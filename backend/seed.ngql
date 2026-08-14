@@ -1,0 +1,97 @@
+-- ============================================================
+-- 对公贷款反欺诈知识图谱 — 示例数据
+-- 演示：贷款回流、担保圈、失联客户等场景
+-- ============================================================
+
+USE anti_fraud_kg;
+
+-- ------------------------------------------------------------
+-- 场景 1：凯达建材贷款回流
+-- ------------------------------------------------------------
+
+insert vertex company(name, unified_code, industry, registered_capital, address, phone, risk_score, is_lost, lost_days) values
+    "c_kaida":("凯达建材有限公司", "91310000XXXXXXXXXX", "建材批发", 50000000.0, "上海市浦东新区张江路 1 号", "021-00001111", 90, false, 0),
+    "c_yongsheng":("永盛砂石经营部", "91310000YYYYYYYYYY", "砂石销售", 3000000.0, "上海市嘉定区沪宜公路 2 号", "021-00002222", 60, false, 0);
+
+insert vertex person(name, id_card, phone, address, risk_score) values
+    "p_wang":("王某", "310XXXXXXXXXXXXXXX", "13800000001", "上海市浦东新区", 80),
+    "p_spouse":("王某配偶", "310YYYYYYYYYYYYYYY", "13800000002", "上海市浦东新区", 85);
+
+insert vertex account(name, account_no, bank, open_date, risk_score) values
+    "a_loan_001":("贷款专户 6222", "6222XXXX0001", "工行浦东支行", "2024-01-10", 70),
+    "a_spouse_8877":("配偶账户 8877", "8877XXXX0001", "招行上海分行", "2023-05-20", 85),
+    "a_yongsheng_5566":("经营部账户 5566", "5566XXXX0001", "农行嘉定支行", "2023-08-15", 60);
+
+insert vertex loan(name, contract_no, amount, currency, issue_date, maturity_date, status, risk_score) values
+    "l_001":("凯达建材流动资金贷款", "DK-2024-0001", 5000000.0, "CNY", "2024-02-01", "2025-02-01", "正常", 90);
+
+insert edge controls(relation, share_ratio, since) values
+    "p_wang" -> "c_kaida":("实际控制人", 0.65, "2018-03-01");
+
+insert edge related_to(relation, source, since) values
+    "p_wang" -> "p_spouse":("配偶", "户籍", "2010-06-01");
+
+insert edge holds_account(open_date, relation) values
+    "c_kaida" -> "a_loan_001":("2024-01-10", "基本户"),
+    "c_yongsheng" -> "a_yongsheng_5566":("2023-08-15", "一般户");
+
+insert edge applied_for(apply_date, amount) values
+    "c_kaida" -> "l_001":("2024-01-20", 5000000.0);
+
+insert edge disbursed_to(disburse_date, amount) values
+    "l_001" -> "a_loan_001":("2024-02-01", 5000000.0);
+
+-- 贷款资金 → 经营部 → 配偶账户 → 提现/消费（贷款回流）
+insert edge transfer(tx_date, amount, currency, memo, channel) values
+    "a_loan_001" -> "a_yongsheng_5566":("2024-02-02 09:30:00", 4800000.0, "CNY", "货款", "网银"),
+    "a_yongsheng_5566" -> "a_spouse_8877":("2024-02-03 14:20:00", 4500000.0, "CNY", "往来款", "跨行转账"),
+    "a_spouse_8877" -> "p_wang":("2024-02-05 11:00:00", 2000000.0, "CNY", "消费/取现", "POS/ATM");
+
+-- ------------------------------------------------------------
+-- 场景 2：东方贸易担保圈 / 集团派系
+-- ------------------------------------------------------------
+
+insert vertex company(name, unified_code, industry, registered_capital, address, phone, risk_score, is_lost, lost_days) values
+    "c_dongfang":("东方贸易集团", "91310000ZZZZZZZZZZ", "进出口贸易", 200000000.0, "上海市虹口区东大名路 10 号", "021-00003333", 85, false, 0),
+    "c_jinhai":("金海进出口有限公司", "91310000AAAAAAAAAA", "进出口贸易", 50000000.0, "上海市虹口区东大名路 11 号", "021-00004444", 72, false, 0),
+    "c_huaxin":("华信供应链有限公司", "91310000BBBBBBBBBB", "供应链服务", 30000000.0, "上海市虹口区东大名路 12 号", "021-00005555", 68, false, 0),
+    "c_yuanhang":("远航船务有限公司", "91310000CCCCCCCCCC", "航运", 80000000.0, "上海市虹口区东大名路 13 号", "021-00006666", 75, false, 0),
+    "c_xinjiyuan":("新纪元仓储有限公司", "91310000DDDDDDDDDD", "仓储物流", 20000000.0, "上海市虹口区东大名路 14 号", "021-00007777", 55, false, 0);
+
+insert edge guarantees(guarantee_date, amount, guarantee_type) values
+    "c_dongfang" -> "c_jinhai":("2023-06-01", 20000000.0, "连带责任保证"),
+    "c_jinhai" -> "c_huaxin":("2023-07-15", 15000000.0, "连带责任保证"),
+    "c_huaxin" -> "c_yuanhang":("2023-08-20", 12000000.0, "连带责任保证"),
+    "c_yuanhang" -> "c_xinjiyuan":("2023-09-10", 8000000.0, "连带责任保证"),
+    "c_xinjiyuan" -> "c_dongfang":("2023-10-05", 10000000.0, "连带责任保证");
+
+insert edge controls(relation, share_ratio, since) values
+    "c_dongfang" -> "c_yuanhang":("实际控制人", 0.51, "2019-01-01");
+
+insert edge related_to(relation, source, since) values
+    "c_dongfang" -> "c_jinhai":("同一办公地址", "工商", "2020-03-01"),
+    "c_dongfang" -> "c_huaxin":("同一办公地址", "工商", "2020-03-01");
+
+-- ------------------------------------------------------------
+-- 场景 3：远景电子失联客户
+-- ------------------------------------------------------------
+
+insert vertex company(name, unified_code, industry, registered_capital, address, phone, risk_score, is_lost, lost_days) values
+    "c_yuanjing":("远景电子科技有限公司", "91310000EEEEEEEEEE", "电子元器件", 10000000.0, "上海市松江区荣乐路 20 号", "021-00009999", 95, true, 45),
+    "c_hongda":("宏达电子有限公司", "91310000FFFFFFFFFF", "电子元器件", 8000000.0, "上海市松江区荣乐路 21 号", "021-00001010", 40, false, 0),
+    "c_yuanelectron":("远航电子有限公司", "91310000GGGGGGGGGG", "电子元器件", 6000000.0, "上海市松江区荣乐路 20 号", "021-00002020", 45, false, 0);
+
+insert vertex person(name, id_card, phone, address, risk_score) values
+    "p_li":("李某", "310ZZZZZZZZZZZZZZZ", "13800000003", "上海市松江区", 90),
+    "p_zhang":("张某", "310WWWWWWWWWWWWWWW", "13800000004", "上海市松江区", 60);
+
+insert edge controls(relation, share_ratio, since) values
+    "p_li" -> "c_yuanjing":("法定代表人", 0.40, "2019-05-01");
+
+insert edge employs(position, since) values
+    "p_zhang" -> "c_yuanjing":("财务负责人", "2020-02-01");
+
+insert edge related_to(relation, source, since) values
+    "p_li" -> "p_zhang":("亲属", "户籍", "2018-01-01"),
+    "c_hongda" -> "c_yuanjing":("上下游", "交易对手", "2021-03-01"),
+    "c_yuanelectron" -> "c_yuanjing":("同一注册地", "工商", "2022-01-01");

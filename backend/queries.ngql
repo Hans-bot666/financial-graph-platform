@@ -1,0 +1,75 @@
+-- ============================================================
+-- 对公贷款反欺诈知识图谱 — 核心 nGQL 查询
+-- ============================================================
+
+USE anti_fraud_kg;
+
+-- ------------------------------------------------------------
+-- 1. 信贷资金流向穿透
+-- ------------------------------------------------------------
+
+-- 1.1 贷款回流：贷款发放账户 → 多跳转账 → 回到借款人或关联方账户
+MATCH p=(c:company)-[:holds_account]->(a:account)
+       -[:transfer*1..5]->(p2:person)-[:controls]->(c)
+WHERE c.company.name == '凯达建材有限公司'
+RETURN p LIMIT 50;
+
+-- 1.2 洗钱路径：从起点账户出发 3~6 跳的多跳转账链
+MATCH p=(src:account)-[:transfer*3..6]->(dst:account)
+WHERE src.name == '贷款专户 6222'
+RETURN p, length(p) AS path_length
+ORDER BY path_length DESC LIMIT 50;
+
+-- 1.3 虚增流水：账户之间短期内循环转账形成闭环
+MATCH p=(a:account)-[:transfer*2..6]->(a)
+WHERE a.name == '贷款专户 6222'
+RETURN p LIMIT 50;
+
+-- 1.4 垒大户：多个账户向同一目标账户大额归集
+MATCH (src:account)-[t:transfer]->(dst:account)
+WHERE dst.name CONTAINS '鼎鑫物流'
+WITH src, dst, sum(t.amount) AS total, count(t) AS cnt
+WHERE total > 1000000
+RETURN src.name, dst.name, total, cnt ORDER BY total DESC LIMIT 50;
+
+-- ------------------------------------------------------------
+-- 2. 担保圈与集团派系识别
+-- ------------------------------------------------------------
+
+-- 2.1 担保圈：企业间闭环担保
+MATCH p=(c:company)-[:guarantees*2..6]->(c)
+WHERE c.name == '东方贸易集团'
+RETURN p LIMIT 50;
+
+-- 2.2 集团派系：通过担保、股权、任职、亲属关系扩展
+MATCH p=(c:company)-[:guarantees|shareholder|employs|related_to*1..4]-(c2:company)
+WHERE c.name == '东方贸易集团'
+RETURN p LIMIT 100;
+
+-- 2.3 担保圈规模统计
+MATCH (c1:company)-[g:guarantees]->(c2:company)
+WITH c1, count(g) AS out_degree, sum(g.amount) AS out_amount
+WHERE out_degree >= 2
+RETURN c1.name AS company_name, out_degree, out_amount
+ORDER BY out_amount DESC LIMIT 20;
+
+-- ------------------------------------------------------------
+-- 3. 失联客户追踪
+-- ------------------------------------------------------------
+
+-- 3.1 失联企业列表
+MATCH (c:company)
+WHERE c.is_lost == true AND c.lost_days >= 30
+RETURN c.name AS company_name, c.phone AS phone, c.address AS address,
+       c.lost_days AS lost_days
+ORDER BY lost_days DESC LIMIT 50;
+
+-- 3.2 失联企业的关联可联人
+MATCH (c:company)-[:controls|related_to|employs*1..3]-(p:person)
+WHERE c.name == '远景电子科技有限公司'
+RETURN c.name, p.name, p.phone, p.risk_score LIMIT 50;
+
+-- 3.3 通过上下游企业间接触达失联客户
+MATCH (c:company)-[:related_to*1..2]-(c2:company)-[:controls|employs]->(p:person)
+WHERE c.name == '远景电子科技有限公司' AND c.is_lost == true
+RETURN c.name, c2.name, p.name, p.phone LIMIT 50;

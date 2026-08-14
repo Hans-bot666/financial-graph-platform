@@ -1,0 +1,135 @@
+-- ============================================================
+-- 对公贷款反欺诈知识图谱 — Nebula Graph 图模型
+-- 图空间：anti_fraud_kg
+-- ============================================================
+
+CREATE SPACE IF NOT EXISTS anti_fraud_kg (partition_num=10, replica_factor=1, vid_type=FIXED_STRING(64));
+USE anti_fraud_kg;
+
+-- ------------------------------------------------------------
+-- 点类型（Tags）
+-- ------------------------------------------------------------
+
+-- 企业
+create tag if not exists company (
+    name string,
+    unified_code string,
+    industry string,
+    registered_capital double,
+    established_date string,
+    address string,
+    phone string,
+    risk_score int,
+    is_lost bool,
+    lost_days int
+);
+
+-- 个人
+create tag if not exists person (
+    name string,
+    id_card string,
+    phone string,
+    address string,
+    risk_score int
+);
+
+-- 银行账户
+create tag if not exists account (
+    name string,
+    account_no string,
+    bank string,
+    open_date string,
+    risk_score int
+);
+
+-- 贷款合同
+create tag if not exists loan (
+    name string,
+    contract_no string,
+    amount double,
+    currency string,
+    issue_date string,
+    maturity_date string,
+    status string,
+    risk_score int
+);
+
+-- ------------------------------------------------------------
+-- 边类型（Edges）
+-- ------------------------------------------------------------
+
+-- 企业开立账户
+create edge if not exists holds_account (
+    open_date string,
+    relation string
+);
+
+-- 企业/个人申请贷款
+create edge if not exists applied_for (
+    apply_date string,
+    amount double
+);
+
+-- 贷款发放至账户
+create edge if not exists disbursed_to (
+    disburse_date string,
+    amount double
+);
+
+-- 账户间转账
+create edge if not exists transfer (
+    tx_date string,
+    amount double,
+    currency string,
+    memo string,
+    channel string
+);
+
+-- 担保关系（企业/个人为企业担保）
+create edge if not exists guarantees (
+    guarantee_date string,
+    amount double,
+    guarantee_type string
+);
+
+-- 实控/控制关系
+create edge if not exists controls (
+    relation string,
+    share_ratio double,
+    since string
+);
+
+-- 股权关系
+create edge if not exists shareholder (
+    share_ratio double,
+    invest_amount double
+);
+
+-- 任职关系
+create edge if not exists employs (
+    position string,
+    since string
+);
+
+-- 亲属/上下游/同一地址等弱关系
+create edge if not exists related_to (
+    relation string,
+    source string,
+    since string
+);
+
+-- ------------------------------------------------------------
+-- 索引（用于按属性查询）
+-- ------------------------------------------------------------
+
+create tag index if not exists company_name on company(name(128));
+create tag index if not exists company_code on company(unified_code(64));
+create tag index if not exists person_name on person(name(64));
+create tag index if not exists account_no on account(account_no(64));
+create tag index if not exists loan_contract on loan(contract_no(64));
+
+rebuild tag index company_name;
+rebuild tag index company_code;
+rebuild tag index person_name;
+rebuild tag index account_no;
+rebuild tag index loan_contract;
