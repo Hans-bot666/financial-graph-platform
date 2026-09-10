@@ -2,6 +2,10 @@ import React, { useEffect, useState } from 'react';
 import type { TabKey } from '@/types/index';
 import { cn } from '@/lib/utils';
 import { getServiceHealth } from '@/services/graph-api';
+import { LogOut, UserRound, Users } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
 
 interface TopNavProps {
   activeTab: TabKey;
@@ -22,9 +26,19 @@ const NAV_TABS: NavTab[] = [
 ];
 
 const TopNav: React.FC<TopNavProps> = ({ activeTab, onTabChange }) => {
+  const { user, signOut, hasPermission } = useAuth();
+  const navigate = useNavigate();
   const [connected,setConnected]=useState(false);
   const [space,setSpace]=useState('未连接');
   useEffect(()=>{let live=true;const check=()=>getServiceHealth().then(value=>{if(live){setConnected(value.database==='connected');setSpace(value.space);}}).catch(()=>{if(live){setConnected(false);setSpace('服务不可用');}});void check();const timer=window.setInterval(check,30000);return()=>{live=false;window.clearInterval(timer);};},[]);
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } catch {
+      toast.warning('本地登录状态已清除，但服务端会话吊销未确认');
+    }
+    navigate('/login', { replace: true });
+  };
   return (
     <header className="bg-white border-b border-border sticky top-0 z-50">
       <div className="flex items-center h-12 px-6 gap-8">
@@ -75,6 +89,32 @@ const TopNav: React.FC<TopNavProps> = ({ activeTab, onTabChange }) => {
             <span className={`text-xs font-medium ${connected?'text-green-700':'text-amber-700'}`}>{connected?'已连接':'未连接'}</span>
           </div>
           <span className="text-xs text-muted-foreground">{space}</span>
+          {hasPermission('user.read') && (
+            <button
+              type="button"
+              onClick={() => navigate('/admin/users')}
+              className="ml-1 flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              <Users className="h-4 w-4" />
+              用户管理
+            </button>
+          )}
+          <div className="mx-1 h-5 w-px bg-border" />
+          <div className="flex items-center gap-1.5 text-xs text-foreground" title={`@${user?.username ?? ''}`}>
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-primary">
+              <UserRound className="h-3.5 w-3.5" />
+            </span>
+            <span className="max-w-24 truncate">{user?.displayName ?? user?.username}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleSignOut()}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            title="退出登录"
+            aria-label="退出登录"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </header>

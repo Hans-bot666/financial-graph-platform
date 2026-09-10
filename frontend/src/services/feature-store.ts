@@ -29,8 +29,9 @@ export const portsCompatible=(source:FeaturePortType,target:FeaturePortType)=>so
 
 export type ValidationResult={valid:boolean;errors:string[];warnings:string[];order:string[]};
 export type FeatureCompileResult={validation:ValidationResult;ir:FeatureIR;target:'ngql-template'|'offline-job';queryTemplate:string|null;parameters:string[]};
-const API_BASE_URL=(import.meta.env.VITE_GRAPH_API_BASE_URL??'http://127.0.0.1:8000').replace(/\/$/,'');
-async function api<T>(path:string,init:RequestInit):Promise<T>{const response=await fetch(`${API_BASE_URL}${path}`,init);const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(typeof body?.detail==='string'?body.detail:`特征服务请求失败（HTTP ${response.status}）`);return body as T;}
+const API_BASE_URL=(import.meta.env.VITE_GRAPH_API_BASE_URL??'').replace(/\/$/,'');
+const csrfToken=()=>{const item=document.cookie.split('; ').find(entry=>entry.startsWith('fgp_csrf='));return item?decodeURIComponent(item.split('=').slice(1).join('=')):'';};
+async function api<T>(path:string,init:RequestInit):Promise<T>{const response=await fetch(`${API_BASE_URL}${path}`,{...init,credentials:'include',headers:{'X-CSRF-Token':csrfToken(),...init.headers}});const body=await response.json().catch(()=>({}));const detail=typeof body?.detail==='string'?body.detail:body?.detail?.message;if(!response.ok)throw new Error(detail??body?.message??`特征服务请求失败（HTTP ${response.status}）`);return body as T;}
 export const saveFeatureDefinitionRemote=(definition:FeatureDefinition)=>api<FeatureDefinition>(`/api/v1/features/definitions/${encodeURIComponent(definition.id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(definition)});
 export const validateFeatureDefinitionRemote=(definition:FeatureDefinition)=>api<ValidationResult>('/api/v1/features/definitions/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(definition)});
 export const compileFeatureDefinitionRemote=(definition:FeatureDefinition)=>api<FeatureCompileResult>('/api/v1/features/definitions/compile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(definition)});

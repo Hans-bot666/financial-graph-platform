@@ -4,7 +4,7 @@ from __future__ import annotations
 from time import perf_counter
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.contracts import (
     FeatureCompileResult, FeatureDefinition, FeatureValidationResult,
@@ -27,9 +27,14 @@ from app.services.feature_service import (
     FeatureDefinitionError, compile_definition, delete_definition, get_definition,
     list_definitions, save_definition, validate_definition,
 )
+from app.api.v1.auth_router import router as auth_router
+from app.api.v1.admin_router import router as admin_router
+from app.api.dependencies import require_permission
 from nebula_client import get_client
 
 router = APIRouter(prefix="/api/v1", tags=["platform-v1"])
+router.include_router(auth_router)
+router.include_router(admin_router)
 
 
 @router.get("/health")
@@ -43,12 +48,20 @@ async def health() -> dict[str, str]:
     }
 
 
-@router.get("/features/definitions", response_model=list[FeatureDefinition])
+@router.get(
+    "/features/definitions",
+    response_model=list[FeatureDefinition],
+    dependencies=[Depends(require_permission("feature.read"))],
+)
 async def feature_definitions() -> list[FeatureDefinition]:
     return list_definitions()
 
 
-@router.get("/features/definitions/{definition_id}", response_model=FeatureDefinition)
+@router.get(
+    "/features/definitions/{definition_id}",
+    response_model=FeatureDefinition,
+    dependencies=[Depends(require_permission("feature.read"))],
+)
 async def feature_definition(definition_id: str) -> FeatureDefinition:
     try:
         return get_definition(definition_id)
@@ -56,7 +69,11 @@ async def feature_definition(definition_id: str) -> FeatureDefinition:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.put("/features/definitions/{definition_id}", response_model=FeatureDefinition)
+@router.put(
+    "/features/definitions/{definition_id}",
+    response_model=FeatureDefinition,
+    dependencies=[Depends(require_permission("feature.write", csrf=True))],
+)
 async def put_feature_definition(definition_id: str, definition: FeatureDefinition) -> FeatureDefinition:
     if definition_id != definition.id:
         raise HTTPException(status_code=409, detail="路径 ID 与特征定义 ID 不一致")
@@ -66,7 +83,11 @@ async def put_feature_definition(definition_id: str, definition: FeatureDefiniti
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.delete("/features/definitions/{definition_id}", status_code=204)
+@router.delete(
+    "/features/definitions/{definition_id}",
+    status_code=204,
+    dependencies=[Depends(require_permission("feature.write", csrf=True))],
+)
 async def remove_feature_definition(definition_id: str) -> None:
     try:
         delete_definition(definition_id)
@@ -74,12 +95,20 @@ async def remove_feature_definition(definition_id: str) -> None:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/features/definitions/validate", response_model=FeatureValidationResult)
+@router.post(
+    "/features/definitions/validate",
+    response_model=FeatureValidationResult,
+    dependencies=[Depends(require_permission("feature.write", csrf=True))],
+)
 async def validate_feature_definition(definition: FeatureDefinition) -> FeatureValidationResult:
     return validate_definition(definition)
 
 
-@router.post("/features/definitions/compile", response_model=FeatureCompileResult)
+@router.post(
+    "/features/definitions/compile",
+    response_model=FeatureCompileResult,
+    dependencies=[Depends(require_permission("feature.write", csrf=True))],
+)
 async def compile_feature_definition(definition: FeatureDefinition) -> FeatureCompileResult:
     try:
         return compile_definition(definition)
@@ -87,12 +116,20 @@ async def compile_feature_definition(definition: FeatureDefinition) -> FeatureCo
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get("/graph/schema", response_model=GraphSchemaCatalog)
+@router.get(
+    "/graph/schema",
+    response_model=GraphSchemaCatalog,
+    dependencies=[Depends(require_permission("graph.read"))],
+)
 async def graph_schema() -> GraphSchemaCatalog:
     return GraphSchemaCatalog(entityTypes=list(ENTITY_TYPES), edgeTypes=list(EDGE_TYPES))
 
 
-@router.post("/graph/vertices/lookup", response_model=GraphResult)
+@router.post(
+    "/graph/vertices/lookup",
+    response_model=GraphResult,
+    dependencies=[Depends(require_permission("graph.read", csrf=True))],
+)
 async def vertex_lookup(request: VertexLookupRequest) -> GraphResult:
     try:
         return lookup_vertex(request.value.strip(), request.field, request.entity_type)
@@ -100,7 +137,11 @@ async def vertex_lookup(request: VertexLookupRequest) -> GraphResult:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/graph/expand", response_model=GraphResult)
+@router.post(
+    "/graph/expand",
+    response_model=GraphResult,
+    dependencies=[Depends(require_permission("graph.query", csrf=True))],
+)
 async def graph_expand(request: GraphExpandRequest) -> GraphResult:
     try:
         return expand_vertex(request.vertex_id.strip(), request.min_hops, request.max_hops, request.edge_types, request.direction)
@@ -108,7 +149,11 @@ async def graph_expand(request: GraphExpandRequest) -> GraphResult:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.post("/graph/paths", response_model=GraphResult)
+@router.post(
+    "/graph/paths",
+    response_model=GraphResult,
+    dependencies=[Depends(require_permission("graph.query", csrf=True))],
+)
 async def graph_paths(request: PathFindRequest) -> GraphResult:
     try:
         return find_paths(request.start_id.strip(), request.end_id.strip(), request.mode, request.max_hops, request.edge_types)
@@ -116,12 +161,20 @@ async def graph_paths(request: PathFindRequest) -> GraphResult:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get("/scenarios", response_model=list[ScenarioTemplate])
+@router.get(
+    "/scenarios",
+    response_model=list[ScenarioTemplate],
+    dependencies=[Depends(require_permission("scenario.read"))],
+)
 async def scenarios() -> list[ScenarioTemplate]:
     return list_scenarios()
 
 
-@router.post("/scenarios/loan-reflux/executions", response_model=GraphResult)
+@router.post(
+    "/scenarios/loan-reflux/executions",
+    response_model=GraphResult,
+    dependencies=[Depends(require_permission("scenario.execute", csrf=True))],
+)
 async def run_loan_reflux(request: ScenarioExecuteRequest) -> GraphResult:
     company_name = request.parameters.get("companyName")
     if not isinstance(company_name, str) or not company_name.strip():
@@ -132,7 +185,11 @@ async def run_loan_reflux(request: ScenarioExecuteRequest) -> GraphResult:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.post("/scenarios/guarantee-circle/executions", response_model=GraphResult)
+@router.post(
+    "/scenarios/guarantee-circle/executions",
+    response_model=GraphResult,
+    dependencies=[Depends(require_permission("scenario.execute", csrf=True))],
+)
 async def run_guarantee_circle(request: ScenarioExecuteRequest) -> GraphResult:
     company_name = request.parameters.get("companyName")
     if not isinstance(company_name, str) or not company_name.strip():
@@ -143,7 +200,11 @@ async def run_guarantee_circle(request: ScenarioExecuteRequest) -> GraphResult:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.post("/scenarios/lost-customer/executions", response_model=GraphResult)
+@router.post(
+    "/scenarios/lost-customer/executions",
+    response_model=GraphResult,
+    dependencies=[Depends(require_permission("scenario.execute", csrf=True))],
+)
 async def run_lost_customer(request: ScenarioExecuteRequest) -> GraphResult:
     company_name = request.parameters.get("companyName")
     lost_days = request.parameters.get("lostDays", 30)
@@ -157,7 +218,11 @@ async def run_lost_customer(request: ScenarioExecuteRequest) -> GraphResult:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.post("/graph/query", response_model=GraphResult)
+@router.post(
+    "/graph/query",
+    response_model=GraphResult,
+    dependencies=[Depends(require_permission("graph.query", csrf=True))],
+)
 async def readonly_query(request: ReadonlyQueryRequest) -> GraphResult:
     try:
         query = enforce_readonly(request.query)

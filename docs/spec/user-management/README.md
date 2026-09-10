@@ -131,7 +131,7 @@ NebulaGraph：仅保存业务图数据，不保存平台用户
 
 - `platform.access`
 - `profile.read.self`, `profile.update.self`
-- `user.read`, `user.create`, `user.update`, `user.status.manage`, `user.role.manage`
+- `user.read`, `user.create`, `user.update`, `user.status.manage`, `user.role.manage`, `user.password.reset`
 - `graph.read`, `graph.query`
 - `scenario.read`, `scenario.execute`
 - `board.read`, `board.write`

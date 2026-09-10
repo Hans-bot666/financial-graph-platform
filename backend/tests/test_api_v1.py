@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1.router import router
+from app.core import auth_db
 from nebula_client import GraphResult as NebulaResult
 
 
@@ -32,9 +35,42 @@ class _FakeNebulaClient:
 class ApiV1Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.previous_db_path = auth_db.USER_DB_PATH
+        auth_db.USER_DB_PATH = Path(cls.temp_dir.name) / "users.db"
         app = FastAPI()
         app.include_router(router)
         cls.client = TestClient(app)
+        registered = cls.client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "api-test-admin",
+                "password": "correct-horse-battery-staple",
+                "displayName": "API 测试管理员",
+            },
+        )
+        user_id = registered.json()["id"]
+        with auth_db.auth_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO user_roles(user_id, role_id, assigned_at)
+                VALUES (?, 'role:platform_admin', '2026-09-10T00:00:00Z')
+                """,
+                (user_id,),
+            )
+        login = cls.client.post(
+            "/api/v1/auth/login",
+            json={"identifier": "api-test-admin", "password": "correct-horse-battery-staple"},
+        )
+        if login.status_code != 200:
+            raise AssertionError(login.text)
+        cls.client.headers.update({"X-CSRF-Token": cls.client.cookies.get("fgp_csrf")})
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.close()
+        auth_db.USER_DB_PATH = cls.previous_db_path
+        cls.temp_dir.cleanup()
 
     def test_scenario_catalog_is_versioned(self) -> None:
         response = self.client.get("/api/v1/scenarios")

@@ -1,5 +1,9 @@
 import MainLayout from './components/layouts/MainLayout';
+import AdminUsers from './pages/AdminUsers';
+import Forbidden from './pages/Forbidden';
+import Login from './pages/Login';
 import NotFound from './pages/NotFound';
+import Register from './pages/Register';
 import type { ReactNode } from 'react';
 
 export interface RouteConfig {
@@ -16,6 +20,28 @@ export const routes: RouteConfig[] = [
     name: '图谱应用平台',
     path: '/',
     element: <MainLayout />,
+  },
+  {
+    name: '用户管理',
+    path: '/admin/users',
+    element: <AdminUsers />,
+  },
+  {
+    name: '登录',
+    path: '/login',
+    element: <Login />,
+    public: true,
+  },
+  {
+    name: '注册',
+    path: '/register',
+    element: <Register />,
+    public: true,
+  },
+  {
+    name: '403',
+    path: '/403',
+    element: <Forbidden />,
     public: true,
   },
   {

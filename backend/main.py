@@ -19,6 +19,8 @@ from pydantic import BaseModel
 
 from nebula_client import get_client
 from app.api.v1.router import router as v1_router
+from app.core.auth_db import auth_connection
+from config import CORS_ORIGINS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -51,6 +53,9 @@ class LostResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 初始化用户 SQLite 数据库和迁移。
+    with auth_connection():
+        logger.info("用户认证数据库已就绪")
     # 启动时预热连接池（不强制成功，失败会回退 Mock）
     try:
         get_client()
@@ -71,7 +76,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

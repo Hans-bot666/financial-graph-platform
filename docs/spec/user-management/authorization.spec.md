@@ -153,6 +153,18 @@ PUT /api/v1/admin/users/{userId}/roles
 
 actor、IP、traceId 和时间由后端生成，调用者不得通过正文覆盖。
 
+### UM-AUTHZ-013 管理员重置其他用户密码（P0）
+
+拥有 `user.password.reset` 的平台管理员可以为其他用户设置新密码。
+
+- 该权限仅授予内置 `platform_admin`。
+- 管理员不能通过后台管理接口修改自己的密码。
+- 新密码必须通过统一密码策略，接口不得回显密码。
+- 请求必须包含 2–500 字符的重置原因和目标用户 `version`。
+- 密码更新、`authVersion`/`version` 递增、会话吊销和审计必须在同一 SQLite 事务内完成。
+- 成功后目标用户全部既有会话立即失效，旧密码不能再登录。
+- 审计事件为 `user.password.reset_by_admin`，只记录操作者、目标用户、原因和结果，不记录密码。
+
 ## 4. API
 
 | 方法 | 路径 | 权限 |
@@ -163,6 +175,7 @@ actor、IP、traceId 和时间由后端生成，调用者不得通过正文覆�
 | PATCH | `/api/v1/admin/users/{userId}` | `user.update` |
 | PATCH | `/api/v1/admin/users/{userId}/status` | `user.status.manage` |
 | PUT | `/api/v1/admin/users/{userId}/roles` | `user.role.manage` |
+| POST | `/api/v1/admin/users/{userId}/password` | `user.password.reset` |
 | GET | `/api/v1/admin/roles` | `user.read` |
 
 分页响应：

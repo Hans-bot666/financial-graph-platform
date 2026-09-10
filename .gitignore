@@ -13,6 +13,10 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
+backend/data/*.db
+backend/data/*.db-*
+backend/data/*.sqlite
+backend/data/*.sqlite-*
 .idea/
 .vscode/
 

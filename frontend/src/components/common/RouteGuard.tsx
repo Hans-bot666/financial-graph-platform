@@ -1,5 +1,4 @@
-import { useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { routes } from '@/routes';
 
@@ -8,7 +7,7 @@ interface RouteGuardProps {
 }
 
 // System-level public routes (no need to register in routes.tsx)
-const SYSTEM_PUBLIC_ROUTES = ['/login', '/403', '/404'];
+const SYSTEM_PUBLIC_ROUTES = ['/403', '/404'];
 
 // Derived from routes.tsx: all routes marked with public: true
 const routePublicPaths = routes.filter(r => r.public).map(r => r.path);
@@ -27,18 +26,7 @@ function matchPublicRoute(path: string, patterns: string[]) {
 
 export function RouteGuard({ children }: RouteGuardProps) {
   const { user, loading } = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
-
-  useEffect(() => {
-    if (loading) return;
-
-    const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
-
-    if (!user && !isPublic) {
-      navigate('/login', { state: { from: location.pathname }, replace: true });
-    }
-  }, [user, loading, location.pathname, navigate]);
 
   if (loading) {
     return (
@@ -46,6 +34,12 @@ export function RouteGuard({ children }: RouteGuardProps) {
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
     );
+  }
+
+  const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
+  if (!user && !isPublic) {
+    const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
+    return <Navigate to={`/login?returnTo=${returnTo}`} replace />;
   }
 
   return <>{children}</>;

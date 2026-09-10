@@ -4,6 +4,8 @@ services:
     env_file: .env
     ports:
       - "8000:8000"
+    volumes:
+      - backend-user-data:/app/data
     restart: unless-stopped
 
   frontend:
@@ -13,4 +15,7 @@ services:
     ports:
       - "8080:80"
     restart: unless-stopped
+
+volumes:
+  backend-user-data:
 
