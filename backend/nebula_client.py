@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -95,6 +96,8 @@ class NebulaClient:
         self.pool: Any = None
         self.session: Any = None
         self._mock = False
+        self.space = NEBULA_SPACE
+        self._lock = threading.RLock()
         self._init_pool()
 
     def _init_pool(self) -> None:
@@ -113,6 +116,7 @@ class NebulaClient:
                 raise RuntimeError("连接池初始化失败")
             self.session = self.pool.get_session(NEBULA_USER, NEBULA_PASSWORD)
             self.session.execute(f"USE {NEBULA_SPACE};")
+            self.space = NEBULA_SPACE
             logger.info("已连接 Nebula Graph %s:%s / space=%s", NEBULA_HOST, NEBULA_PORT, NEBULA_SPACE)
         except Exception as exc:
             logger.warning("连接 Nebula Graph 失败：%s，回退到 Mock 模式。", exc)
@@ -144,7 +148,7 @@ class NebulaClient:
         self.session = None
 
     def execute(self, ngql: str) -> GraphResult:
-        """执行 nGQL 并返回统一结构。"""
+        """执行 nGQL 并返回统一结构。调用方若需指定空间，应使用 execute_in_space。"""
         if self._mock:
             return self._mock_execute(ngql)
 
@@ -191,6 +195,18 @@ class NebulaClient:
         except Exception as exc:
             logger.exception("解析结果异常：%s", exc)
             return GraphResult(-1, f"解析异常: {exc}", [], [])
+
+    def execute_in_space(self, space: str, ngql: str) -> GraphResult:
+        """在指定图空间执行查询；持锁保证并发请求不串空间。
+
+        `space` 必须已由上层白名单校验通过。
+        """
+        with self._lock:
+            use_result = self.execute(f"USE {space};")
+            if use_result.error_code != 0:
+                return use_result
+            self.space = space
+            return self.execute(ngql)
 
     # ------------------------------------------------------------------
     # Mock 实现：用于无 Nebula 环境演示

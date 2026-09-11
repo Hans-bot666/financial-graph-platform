@@ -73,15 +73,30 @@ class ScenarioTemplate(BaseModel):
     parameters: list[ScenarioParameter]
 
 
+class GraphSpaceSummary(BaseModel):
+    id: str
+    display_name: str = Field(alias="displayName")
+    status: Literal["ready", "offline", "unknown"] = "ready"
+    description: str | None = None
+    vertex_count: int | None = Field(default=None, alias="vertexCount")
+    edge_count: int | None = Field(default=None, alias="edgeCount")
+    is_default: bool = Field(default=False, alias="isDefault")
+
+    model_config = {"populate_by_name": True}
+
+
 class ScenarioExecuteRequest(BaseModel):
+    space: str = Field(min_length=1, max_length=128)
     parameters: dict[str, Any]
 
 
 class ReadonlyQueryRequest(BaseModel):
+    space: str = Field(min_length=1, max_length=128)
     query: str = Field(min_length=1, max_length=20_000)
 
 
 class VertexLookupRequest(BaseModel):
+    space: str = Field(min_length=1, max_length=128)
     value: str = Field(min_length=1, max_length=256)
     field: Literal["id", "name"] = "id"
     entity_type: str | None = Field(default=None, alias="entityType")
@@ -90,6 +105,7 @@ class VertexLookupRequest(BaseModel):
 
 
 class GraphExpandRequest(BaseModel):
+    space: str = Field(min_length=1, max_length=128)
     vertex_id: str = Field(min_length=1, max_length=256, alias="vertexId")
     min_hops: int = Field(default=1, ge=1, le=6, alias="minHops")
     max_hops: int = Field(default=1, ge=1, le=6, alias="maxHops")
@@ -100,6 +116,7 @@ class GraphExpandRequest(BaseModel):
 
 
 class PathFindRequest(BaseModel):
+    space: str = Field(min_length=1, max_length=128)
     start_id: str = Field(min_length=1, max_length=256, alias="startId")
     end_id: str = Field(min_length=1, max_length=256, alias="endId")
     mode: Literal["shortest", "all", "any-shortest"] = "shortest"

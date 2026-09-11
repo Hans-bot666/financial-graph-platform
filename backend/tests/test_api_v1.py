@@ -15,6 +15,7 @@ from nebula_client import GraphResult as NebulaResult
 
 class _FakeNebulaClient:
     last_query = ""
+    spaces_used: list[str] = []
 
     def execute(self, query: str) -> NebulaResult:
         type(self).last_query = query
@@ -30,6 +31,10 @@ class _FakeNebulaClient:
                 "edges": [{"from": "c1", "to": "a1", "type": "holds_account"}],
             }]],
         )
+
+    def execute_in_space(self, space: str, query: str) -> NebulaResult:
+        type(self).spaces_used.append(space)
+        return self.execute(query)
 
 
 class ApiV1Tests(unittest.TestCase):
@@ -85,7 +90,7 @@ class ApiV1Tests(unittest.TestCase):
         with patch("app.api.v1.router.get_client", return_value=_FakeNebulaClient()):
             response = self.client.post(
                 "/api/v1/graph/query",
-                json={"query": "MATCH p=()-[]->() RETURN p LIMIT 10"},
+                json={"space": "anti_fraud_kg", "query": "MATCH p=()-[]->() RETURN p LIMIT 10"},
             )
         body = response.json()
         self.assertEqual(response.status_code, 200)
@@ -96,7 +101,7 @@ class ApiV1Tests(unittest.TestCase):
     def test_mutating_query_is_rejected_before_database_call(self) -> None:
         response = self.client.post(
             "/api/v1/graph/query",
-            json={"query": "CREATE TAG forbidden(name string)"},
+            json={"space": "anti_fraud_kg", "query": "CREATE TAG forbidden(name string)"},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("禁止执行写入", response.json()["detail"])
@@ -107,6 +112,15 @@ class ApiV1Tests(unittest.TestCase):
         self.assertIn("company", response.json()["entityTypes"])
         self.assertIn("transfer", response.json()["edgeTypes"])
 
+    def test_graph_spaces_catalog(self) -> None:
+        response = self.client.get("/api/v1/graph/spaces")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertGreaterEqual(len(body), 1)
+        self.assertEqual(body[0]["id"], "anti_fraud_kg")
+        self.assertTrue(body[0]["isDefault"])
+        self.assertEqual(body[0]["displayName"], "对公贷款反欺诈图")
+
     def test_health_reports_real_database_state(self) -> None:
         with patch("app.api.v1.router.get_client", return_value=_FakeNebulaClient()):
             response = self.client.get("/api/v1/health")
@@ -114,18 +128,26 @@ class ApiV1Tests(unittest.TestCase):
         self.assertEqual(response.json()["database"], "connected")
 
     def test_vertex_lookup_escapes_user_literal(self) -> None:
+        _FakeNebulaClient.spaces_used = []
         with patch("app.services.exploration_service.get_client", return_value=_FakeNebulaClient()):
             response = self.client.post(
                 "/api/v1/graph/vertices/lookup",
-                json={"value": 'c1" OR true', "field": "id"},
+                json={"space": "anti_fraud_kg", "value": 'c1" OR true', "field": "id"},
             )
         self.assertEqual(response.status_code, 200)
         self.assertIn('c1\\" OR true', _FakeNebulaClient.last_query)
+        self.assertEqual(_FakeNebulaClient.spaces_used, ["anti_fraud_kg"])
 
     def test_expand_rejects_unregistered_edge_type(self) -> None:
         response = self.client.post(
             "/api/v1/graph/expand",
-            json={"vertexId": "c1", "minHops": 1, "maxHops": 2, "edgeTypes": ["DROP"]},
+            json={
+                "space": "anti_fraud_kg",
+                "vertexId": "c1",
+                "minHops": 1,
+                "maxHops": 2,
+                "edgeTypes": ["DROP"],
+            },
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("不支持的边类型", response.json()["detail"])
@@ -134,49 +156,102 @@ class ApiV1Tests(unittest.TestCase):
         with patch("app.services.exploration_service.get_client", return_value=_FakeNebulaClient()):
             response = self.client.post(
                 "/api/v1/graph/paths",
-                json={"startId": "c1", "endId": "a1", "mode": "any-shortest", "maxHops": 5},
+                json={
+                    "space": "anti_fraud_kg",
+                    "startId": "c1",
+                    "endId": "a1",
+                    "mode": "any-shortest",
+                    "maxHops": 5,
+                },
             )
         self.assertEqual(response.status_code, 200)
         self.assertIn("FIND SHORTEST PATH WITH PROP", _FakeNebulaClient.last_query)
         self.assertIn("UPTO 5 STEPS", _FakeNebulaClient.last_query)
         self.assertIn("LIMIT 1", _FakeNebulaClient.last_query)
 
+    def test_unknown_space_is_rejected(self) -> None:
+        response = self.client.post(
+            "/api/v1/graph/vertices/lookup",
+            json={"space": "not_in_catalog", "value": "c1", "field": "id"},
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"]["code"], "SPACE_NOT_FOUND")
+
+    def test_missing_space_is_rejected(self) -> None:
+        response = self.client.post(
+            "/api/v1/graph/vertices/lookup",
+            json={"value": "c1", "field": "id"},
+        )
+        self.assertEqual(response.status_code, 422)
+
     def test_scenario_validates_required_parameter(self) -> None:
         response = self.client.post(
             "/api/v1/scenarios/loan-reflux/executions",
-            json={"parameters": {}},
+            json={"space": "anti_fraud_kg", "parameters": {}},
         )
         self.assertEqual(response.status_code, 422)
 
     def test_guarantee_circle_uses_unified_graph_contract(self) -> None:
+        _FakeNebulaClient.spaces_used = []
         with patch("app.services.scenario_service.get_client", return_value=_FakeNebulaClient()):
             response = self.client.post(
                 "/api/v1/scenarios/guarantee-circle/executions",
-                json={"parameters": {"companyName": "东方贸易集团"}},
+                json={"space": "anti_fraud_kg", "parameters": {"companyName": "东方贸易集团"}},
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["title"], "担保圈识别")
         self.assertEqual(response.json()["edges"][0]["source"], "c1")
+        self.assertEqual(_FakeNebulaClient.spaces_used, ["anti_fraud_kg"])
 
     def test_lost_customer_validates_days_range(self) -> None:
         response = self.client.post(
             "/api/v1/scenarios/lost-customer/executions",
-            json={"parameters": {"companyName": "远景电子科技有限公司", "lostDays": 0}},
+            json={
+                "space": "anti_fraud_kg",
+                "parameters": {"companyName": "远景电子科技有限公司", "lostDays": 0},
+            },
         )
         self.assertEqual(response.status_code, 422)
 
     def test_scenario_database_error_returns_bad_gateway(self) -> None:
         class FailingClient:
-            def execute(self, query: str) -> NebulaResult:
+            def execute_in_space(self, space: str, query: str) -> NebulaResult:
                 return NebulaResult(-1, "database unavailable", [], [])
 
         with patch("app.services.scenario_service.get_client", return_value=FailingClient()):
             response = self.client.post(
                 "/api/v1/scenarios/loan-reflux/executions",
-                json={"parameters": {"companyName": "凯达建材有限公司"}},
+                json={"space": "anti_fraud_kg", "parameters": {"companyName": "凯达建材有限公司"}},
             )
         self.assertEqual(response.status_code, 502)
         self.assertIn("database unavailable", response.json()["detail"])
+
+    def test_alternating_spaces_do_not_cross(self) -> None:
+        _FakeNebulaClient.spaces_used = []
+        with patch.dict("os.environ", {"NEBULA_EXTRA_SPACES": "random_financial_graph_million"}):
+            with patch(
+                "app.services.graph_space_service.NEBULA_EXTRA_SPACES",
+                "random_financial_graph_million",
+            ):
+                with patch("app.services.exploration_service.get_client", return_value=_FakeNebulaClient()):
+                    first = self.client.post(
+                        "/api/v1/graph/vertices/lookup",
+                        json={"space": "anti_fraud_kg", "value": "c1", "field": "id"},
+                    )
+                    second = self.client.post(
+                        "/api/v1/graph/vertices/lookup",
+                        json={
+                            "space": "random_financial_graph_million",
+                            "value": "million_c_000000",
+                            "field": "id",
+                        },
+                    )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(
+            _FakeNebulaClient.spaces_used,
+            ["anti_fraud_kg", "random_financial_graph_million"],
+        )
 
     @staticmethod
     def _feature_payload() -> dict:

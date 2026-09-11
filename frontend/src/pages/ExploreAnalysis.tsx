@@ -10,12 +10,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { createSubGraph, listBoards } from '@/services/board-store';
 import {
   executeGraphQuery, executeScenario, expandVertex, findPaths, type GraphResult, getGraphSchema,
-  listScenarios, lookupVertex, type ScenarioTemplate,
+  listGraphSpaces, listScenarios, lookupVertex, type GraphSpaceSummary, type ScenarioTemplate,
 } from '@/services/graph-api';
-import { builtinGraphInstances, type GraphInstance, INGESTION_EVENT } from '@/services/ingestion-store';
 import type { GraphData, GraphEdge, GraphNode, SceneBoard } from '@/types/index';
 
 const EMPTY_GRAPH: GraphData = { nodes: [], edges: [] };
+const ACTIVE_SPACE_KEY = 'financial-active-graph-space';
 const NODE_COLORS: Record<string, string> = {
   company: '#22C897', person: '#4B96FF', account: '#F59E0B', loan: '#A855F7', default: '#64748B',
 };
@@ -83,23 +83,40 @@ const ExploreAnalysis: React.FC<ExploreAnalysisProps> = ({ targetSceneBoardId, i
   const [sceneBoards, setSceneBoards] = useState<SceneBoard[]>([]);
   const [saveBoardId, setSaveBoardId] = useState(targetSceneBoardId ?? '');
   const [saveName, setSaveName] = useState('探索分析结果');
-  const [graphInstances, setGraphInstances] = useState<GraphInstance[]>(builtinGraphInstances());
-  const [activeGraphId, setActiveGraphId] = useState(()=>builtinGraphInstances().find(graph=>graph.status==='ready')?.id??'');
-  const activeGraph=graphInstances.find(graph=>graph.id===activeGraphId);
+  const [graphSpaces, setGraphSpaces] = useState<GraphSpaceSummary[]>([]);
+  const [spacesError, setSpacesError] = useState<string | null>(null);
+  const [activeSpaceId, setActiveSpaceId] = useState('');
+  const activeSpace = graphSpaces.find((space) => space.id === activeSpaceId);
+  const hasReadySpace = Boolean(activeSpace && activeSpace.status === 'ready');
 
   useEffect(() => {
-    Promise.all([getGraphSchema(), listScenarios()]).then(([schema, templates]) => {
+    Promise.all([getGraphSchema(), listScenarios(), listGraphSpaces()]).then(([schema, templates, spaces]) => {
       setEntityTypes(schema.entityTypes); setEdgeTypes(schema.edgeTypes); setSelectedEdges(schema.edgeTypes);
       setScenarios(templates);
       if (templates[0]) {
         setScenarioId(templates[0].id);
         setScenarioParams(Object.fromEntries(templates[0].parameters.map((p) => [p.name, p.default == null ? (p.name === 'companyName' ? '凯达建材有限公司' : '') : String(p.default)])));
       }
-    }).catch((error) => toast.error(error instanceof Error ? error.message : '分析目录加载失败'));
+      setGraphSpaces(spaces);
+      setSpacesError(null);
+      const remembered = localStorage.getItem(ACTIVE_SPACE_KEY) ?? '';
+      const ready = spaces.filter((item) => item.status === 'ready');
+      const next =
+        ready.find((item) => item.id === remembered)?.id
+        ?? ready.find((item) => item.isDefault)?.id
+        ?? ready[0]?.id
+        ?? '';
+      setActiveSpaceId(next);
+    }).catch((error) => {
+      const message = error instanceof Error ? error.message : '分析目录加载失败';
+      setSpacesError(message);
+      setGraphSpaces([]);
+      setActiveSpaceId('');
+      toast.error(message);
+    });
   }, []);
 
   useEffect(() => { if (targetSceneBoardId) setSaveBoardId(targetSceneBoardId); }, [targetSceneBoardId]);
-  useEffect(()=>{const refresh=()=>setGraphInstances(builtinGraphInstances());window.addEventListener(INGESTION_EVENT,refresh);return()=>window.removeEventListener(INGESTION_EVENT,refresh);},[]);
 
   const openSave = async () => {
     const boards = listBoards();
@@ -153,6 +170,14 @@ const ExploreAnalysis: React.FC<ExploreAnalysisProps> = ({ targetSceneBoardId, i
 
   useEffect(() => { if (initialGraphData) void renderGraph(initialGraphData); }, [initialGraphData, renderGraph]);
 
+  const selectSpace = (spaceId: string) => {
+    setActiveSpaceId(spaceId);
+    localStorage.setItem(ACTIVE_SPACE_KEY, spaceId);
+    setSelectedNode(null);
+    void renderGraph(EMPTY_GRAPH);
+    setLastResult(null);
+  };
+
   const consume = async (request: Promise<GraphResult>, merge = false, highlight = false) => {
     setBusy(true);
     try {
@@ -185,7 +210,33 @@ const ExploreAnalysis: React.FC<ExploreAnalysisProps> = ({ targetSceneBoardId, i
     <div className="flex h-[calc(100dvh-48px)] min-h-0 min-w-0 overflow-hidden bg-background">
       <aside className="flex w-[340px] min-w-[300px] shrink-0 flex-col overflow-hidden border-r bg-white">
         <div className="shrink-0 border-b px-4 py-3"><div className="text-sm font-semibold">探索分析</div><div className="mt-0.5 text-[11px] text-muted-foreground">实体检索、关系展开、路径研判与场景分析</div></div>
-        <div className="shrink-0 border-b bg-secondary/30 px-3 py-2"><FieldLabel>当前分析图</FieldLabel><select aria-label="当前分析图" value={activeGraphId} onChange={e=>{setActiveGraphId(e.target.value);void renderGraph(EMPTY_GRAPH);setLastResult(null);}} className="h-8 w-full rounded-md border bg-white px-2 text-xs">{graphInstances.map(graph=><option key={graph.id} value={graph.id} disabled={graph.status!=='ready'}>{graph.name} · {graph.spaceName}{graph.status==='ready'?'':' · 未就绪'}</option>)}</select><div className="mt-1 text-[10px] text-muted-foreground">{activeGraph?`${activeGraph.vertexCount} 节点 · ${activeGraph.edgeCount} 边 · ${activeGraph.status}`:'请选择已导入完成的图'}</div></div>
+        <div className="shrink-0 border-b bg-secondary/30 px-3 py-2">
+          <FieldLabel>当前分析图</FieldLabel>
+          <select
+            aria-label="当前分析图"
+            value={activeSpaceId}
+            onChange={(e) => selectSpace(e.target.value)}
+            className="h-8 w-full rounded-md border bg-white px-2 text-xs"
+            disabled={graphSpaces.length === 0}
+          >
+            {graphSpaces.length === 0 ? (
+              <option value="">暂无可用图空间</option>
+            ) : (
+              graphSpaces.map((space) => (
+                <option key={space.id} value={space.id} disabled={space.status !== 'ready'}>
+                  {space.displayName} · {space.id}{space.status === 'ready' ? '' : ' · 未就绪'}
+                </option>
+              ))
+            )}
+          </select>
+          <div className="mt-1 text-[10px] text-muted-foreground">
+            {spacesError
+              ? spacesError
+              : activeSpace
+                ? `${activeSpace.vertexCount ?? '—'} 节点 · ${activeSpace.edgeCount ?? '—'} 边 · ${activeSpace.status}`
+                : '请选择已登记且就绪的图空间'}
+          </div>
+        </div>
         <Tabs value={module} onValueChange={(v) => setModule(v as Module)} className="flex min-h-0 flex-1 flex-col">
           <TabsList className="mx-3 mt-3 grid h-9 shrink-0 grid-cols-3">
             <TabsTrigger value="custom" className="text-xs">自定义分析</TabsTrigger>
@@ -201,14 +252,14 @@ const ExploreAnalysis: React.FC<ExploreAnalysisProps> = ({ targetSceneBoardId, i
                 <div><FieldLabel>查询方式</FieldLabel><select value={lookupField} onChange={(e) => setLookupField(e.target.value as 'id'|'name')} className="h-8 w-full rounded-md border bg-white px-2 text-xs"><option value="id">实体 ID</option><option value="name">标签名称</option></select></div>
                 {lookupField === 'name' && <div><FieldLabel>实体类型</FieldLabel><select value={lookupType} onChange={(e) => setLookupType(e.target.value)} className="h-8 w-full rounded-md border bg-white px-2 text-xs">{entityTypes.map((t) => <option key={t}>{t}</option>)}</select></div>}
                 <div><FieldLabel>{lookupField === 'id' ? '实体 ID' : '标签名称'}</FieldLabel><Input value={lookupValue} onChange={(e) => setLookupValue(e.target.value)} className="h-8 text-xs" /></div>
-                <Button disabled={busy || !lookupValue.trim()} className="h-8 w-full text-xs" onClick={() => consume(lookupVertex({ value: lookupValue.trim(), field: lookupField, entityType: lookupField === 'name' ? lookupType : undefined }))}>查询并显示</Button>
+                <Button disabled={busy || !hasReadySpace || !lookupValue.trim()} className="h-8 w-full text-xs" onClick={() => consume(lookupVertex({ space: activeSpaceId, value: lookupValue.trim(), field: lookupField, entityType: lookupField === 'name' ? lookupType : undefined }))}>查询并显示</Button>
               </section>}
               {customTool === 'expand' && <section className="space-y-3">
                 <div><FieldLabel>中心点 ID（点击画布节点自动带入）</FieldLabel><Input value={expandId} onChange={(e) => setExpandId(e.target.value)} className="h-8 text-xs" /></div>
                 <div className="grid grid-cols-2 gap-2"><div><FieldLabel>最小跳数</FieldLabel><Input type="number" min={1} max={6} value={minHops} onChange={(e) => setMinHops(Number(e.target.value))} className="h-8 text-xs" /></div><div><FieldLabel>最大跳数</FieldLabel><Input type="number" min={1} max={6} value={maxHops} onChange={(e) => setMaxHops(Number(e.target.value))} className="h-8 text-xs" /></div></div>
                 <div><FieldLabel>方向</FieldLabel><select value={direction} onChange={(e) => setDirection(e.target.value as 'both'|'out'|'in')} className="h-8 w-full rounded-md border bg-white px-2 text-xs"><option value="both">双向</option><option value="out">流出</option><option value="in">流入</option></select></div>
                 <EdgeSelector edges={edgeTypes} selected={selectedEdges} onToggle={toggleEdge} onAll={() => setSelectedEdges(selectedEdges.length === edgeTypes.length ? [] : edgeTypes)} />
-                <Button disabled={busy || !expandId.trim() || minHops > maxHops || selectedEdges.length === 0} className="h-8 w-full text-xs" onClick={() => consume(expandVertex({ vertexId: expandId.trim(), minHops, maxHops, edgeTypes: selectedEdges, direction }), true)}>展开并合并画布</Button>
+                <Button disabled={busy || !hasReadySpace || !expandId.trim() || minHops > maxHops || selectedEdges.length === 0} className="h-8 w-full text-xs" onClick={() => consume(expandVertex({ space: activeSpaceId, vertexId: expandId.trim(), minHops, maxHops, edgeTypes: selectedEdges, direction }), true)}>展开并合并画布</Button>
               </section>}
               {customTool === 'path' && <section className="space-y-3">
                 <div><FieldLabel>起点 ID</FieldLabel><div className="flex gap-1"><Input value={startId} onChange={(e) => setStartId(e.target.value)} className="h-8 text-xs" /><Button variant="outline" className="h-8 px-2 text-[11px]" onClick={() => selectedNode && setStartId(selectedNode.id)}>取选中点</Button></div></div>
@@ -216,22 +267,22 @@ const ExploreAnalysis: React.FC<ExploreAnalysisProps> = ({ targetSceneBoardId, i
                 <div><FieldLabel>路径模式</FieldLabel><select value={pathMode} onChange={(e) => setPathMode(e.target.value as typeof pathMode)} className="h-8 w-full rounded-md border bg-white px-2 text-xs"><option value="shortest">最短路径（全部并列最短）</option><option value="any-shortest">任意最短路径</option><option value="all">最全路径</option></select></div>
                 <div><FieldLabel>最大跳数</FieldLabel><Input type="number" min={1} max={10} value={pathHops} onChange={(e) => setPathHops(Number(e.target.value))} className="h-8 text-xs" /></div>
                 <EdgeSelector edges={edgeTypes} selected={selectedEdges} onToggle={toggleEdge} onAll={() => setSelectedEdges(selectedEdges.length === edgeTypes.length ? [] : edgeTypes)} />
-                <Button disabled={busy || !startId.trim() || !endId.trim() || selectedEdges.length === 0} className="h-8 w-full text-xs" onClick={() => consume(findPaths({ startId: startId.trim(), endId: endId.trim(), mode: pathMode, maxHops: pathHops, edgeTypes: selectedEdges }), true, true)}>查找并高亮路径</Button>
+                <Button disabled={busy || !hasReadySpace || !startId.trim() || !endId.trim() || selectedEdges.length === 0} className="h-8 w-full text-xs" onClick={() => consume(findPaths({ space: activeSpaceId, startId: startId.trim(), endId: endId.trim(), mode: pathMode, maxHops: pathHops, edgeTypes: selectedEdges }), true, true)}>查找并高亮路径</Button>
               </section>}
             </div></ScrollArea>
           </TabsContent>
           <TabsContent value="scenario" className="mt-0 min-h-0 flex-1 overflow-hidden"><ScrollArea className="h-full"><div className="space-y-3 p-3">
             <div><FieldLabel>分析模版</FieldLabel><select value={scenarioId} onChange={(e) => { const id=e.target.value; const s=scenarios.find((x)=>x.id===id); setScenarioId(id); setScenarioParams(Object.fromEntries((s?.parameters ?? []).map((p)=>[p.name,p.default == null?'':String(p.default)]))); }} className="h-8 w-full rounded-md border bg-white px-2 text-xs">{scenarios.map((s)=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-            {selectedScenario && <><div className="rounded-md border bg-secondary/40 p-3"><div className="text-xs font-medium">{selectedScenario.name}</div><p className="mt-1 text-[11px] leading-5 text-muted-foreground">{selectedScenario.description}</p><Badge variant="outline" className="mt-2 text-[10px]">{selectedScenario.category} · v{selectedScenario.version}</Badge></div>{selectedScenario.parameters.map((p)=><div key={p.name}><FieldLabel>{p.label}{p.required?' *':''}</FieldLabel><Input value={scenarioParams[p.name] ?? ''} onChange={(e)=>setScenarioParams((v)=>({...v,[p.name]:e.target.value}))} className="h-8 text-xs" /></div>)}<Button disabled={busy} className="h-8 w-full text-xs" onClick={() => consume(executeScenario(selectedScenario.id, Object.fromEntries(selectedScenario.parameters.map((p)=>[p.name,p.type==='integer'?Number(scenarioParams[p.name]):scenarioParams[p.name]]))))}>执行场景分析</Button></>}
+            {selectedScenario && <><div className="rounded-md border bg-secondary/40 p-3"><div className="text-xs font-medium">{selectedScenario.name}</div><p className="mt-1 text-[11px] leading-5 text-muted-foreground">{selectedScenario.description}</p><Badge variant="outline" className="mt-2 text-[10px]">{selectedScenario.category} · v{selectedScenario.version}</Badge></div>{selectedScenario.parameters.map((p)=><div key={p.name}><FieldLabel>{p.label}{p.required?' *':''}</FieldLabel><Input value={scenarioParams[p.name] ?? ''} onChange={(e)=>setScenarioParams((v)=>({...v,[p.name]:e.target.value}))} className="h-8 text-xs" /></div>)}<Button disabled={busy || !hasReadySpace} className="h-8 w-full text-xs" onClick={() => consume(executeScenario(selectedScenario.id, activeSpaceId, Object.fromEntries(selectedScenario.parameters.map((p)=>[p.name,p.type==='integer'?Number(scenarioParams[p.name]):scenarioParams[p.name]]))))}>执行场景分析</Button></>}
             <div className="rounded-md border border-dashed p-3 text-[11px] leading-5 text-muted-foreground">模版将继续扩展：洗钱路径、虚增流水、垒大户行为。每个模版由后台版本化管理实体类型、阈值和分析参数。</div>
           </div></ScrollArea></TabsContent>
-          <TabsContent value="gql" className="mt-0 min-h-0 flex-1 p-3"><div className="flex h-full flex-col gap-3"><div className="text-[11px] leading-5 text-muted-foreground">仅允许只读 GQL，自动限制返回规模。结果中的点、边、路径会直接映射到画布。</div><textarea value={gql} onChange={(e)=>setGql(e.target.value)} className="min-h-0 flex-1 resize-none rounded-md border bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100" /><Button disabled={busy || !gql.trim()} className="h-8 text-xs" onClick={()=>consume(executeGraphQuery(gql))}>执行 GQL</Button></div></TabsContent>
+          <TabsContent value="gql" className="mt-0 min-h-0 flex-1 p-3"><div className="flex h-full flex-col gap-3"><div className="text-[11px] leading-5 text-muted-foreground">仅允许只读 GQL，自动限制返回规模。结果中的点、边、路径会直接映射到画布。</div><textarea value={gql} onChange={(e)=>setGql(e.target.value)} className="min-h-0 flex-1 resize-none rounded-md border bg-slate-950 p-3 font-mono text-xs leading-5 text-slate-100" /><Button disabled={busy || !hasReadySpace || !gql.trim()} className="h-8 text-xs" onClick={()=>consume(executeGraphQuery(activeSpaceId, gql))}>执行 GQL</Button></div></TabsContent>
         </Tabs>
       </aside>
 
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <div className="z-10 flex h-12 shrink-0 items-center justify-between gap-2 border-b bg-white px-3">
-          <div className="min-w-0"><div className="truncate text-xs font-medium">分析画布 · {activeGraph?.name??'未选择图'}</div><div className="text-[10px] text-muted-foreground">{graphData.nodes.length} 节点 · {graphData.edges.length} 边{lastResult ? ` · ${lastResult.executionTimeMs}ms` : ''}</div></div>
+          <div className="min-w-0"><div className="truncate text-xs font-medium">分析画布 · {activeSpace?.displayName??'未选择图'}</div><div className="text-[10px] text-muted-foreground">{graphData.nodes.length} 节点 · {graphData.edges.length} 边{lastResult ? ` · ${lastResult.executionTimeMs}ms` : ''}</div></div>
           <div className="flex shrink-0 items-center gap-1"><span className="hidden text-[11px] text-muted-foreground lg:inline">布局</span><select aria-label="画布布局" value={layout} onChange={(e)=>void changeLayout(e.target.value as Layout)} className="h-8 rounded-md border bg-white px-2 text-xs"><option value="force">力导向</option><option value="circular">环形</option><option value="dagre">树状 / 层次</option></select><Button variant="outline" className="h-8 px-2 text-xs" onClick={()=>graphRef.current?.fitView()}>适应画布</Button><Button variant="outline" className="h-8 px-2 text-xs" disabled={graphData.nodes.length === 0} onClick={()=>void openSave()}>保存到看板</Button><Button variant="outline" className="h-8 px-2 text-xs" onClick={()=>void renderGraph(EMPTY_GRAPH)}>清空</Button></div>
         </div>
         {lastResult && <div className="shrink-0 border-b bg-primary/5 px-3 py-1.5 text-[11px] text-muted-foreground"><span className="font-medium text-foreground">{lastResult.title}</span><span className="ml-3">Trace {lastResult.traceId.slice(0,8)}</span>{lastResult.truncated && <span className="ml-3 text-amber-600">结果已截断</span>}</div>}

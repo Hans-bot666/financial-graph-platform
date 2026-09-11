@@ -32,7 +32,18 @@ export interface GraphSchemaCatalog {
   entityTypes: string[];
   edgeTypes: string[];
 }
-export interface ServiceHealth { status:string; database:string; space:string }
+
+export interface GraphSpaceSummary {
+  id: string;
+  displayName: string;
+  status: 'ready' | 'offline' | 'unknown';
+  description?: string | null;
+  vertexCount?: number | null;
+  edgeCount?: number | null;
+  isDefault: boolean;
+}
+
+export interface ServiceHealth { status: string; database: string; space: string; catalogSize?: number }
 
 const API_BASE_URL = (import.meta.env.VITE_GRAPH_API_BASE_URL ?? '').replace(/\/$/, '');
 const QUERY_TIMEOUT_MS = 30_000;
@@ -89,11 +100,19 @@ export function listScenarios(): Promise<ScenarioTemplate[]> {
   return requestJson<ScenarioTemplate[]>('/api/v1/scenarios');
 }
 
-export function executeScenario(id: string, parameters: Record<string, unknown>): Promise<GraphResult> {
+export function listGraphSpaces(): Promise<GraphSpaceSummary[]> {
+  return requestJson<GraphSpaceSummary[]>('/api/v1/graph/spaces');
+}
+
+export function executeScenario(
+  id: string,
+  space: string,
+  parameters: Record<string, unknown>,
+): Promise<GraphResult> {
   return requestJson<GraphResult>(`/api/v1/scenarios/${encodeURIComponent(id)}/executions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ parameters }),
+    body: JSON.stringify({ space, parameters }),
   });
 }
 
@@ -102,14 +121,16 @@ export function getGraphSchema(): Promise<GraphSchemaCatalog> {
 }
 export function getServiceHealth(): Promise<ServiceHealth> { return requestJson<ServiceHealth>('/api/v1/health'); }
 
-export function lookupVertex(input: { value: string; field: 'id' | 'name'; entityType?: string }): Promise<GraphResult> {
+export function lookupVertex(input: {
+  space: string; value: string; field: 'id' | 'name'; entityType?: string;
+}): Promise<GraphResult> {
   return requestJson<GraphResult>('/api/v1/graph/vertices/lookup', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   });
 }
 
 export function expandVertex(input: {
-  vertexId: string; minHops: number; maxHops: number; edgeTypes: string[]; direction: 'both' | 'out' | 'in';
+  space: string; vertexId: string; minHops: number; maxHops: number; edgeTypes: string[]; direction: 'both' | 'out' | 'in';
 }): Promise<GraphResult> {
   return requestJson<GraphResult>('/api/v1/graph/expand', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
@@ -117,17 +138,17 @@ export function expandVertex(input: {
 }
 
 export function findPaths(input: {
-  startId: string; endId: string; mode: 'shortest' | 'all' | 'any-shortest'; maxHops: number; edgeTypes: string[];
+  space: string; startId: string; endId: string; mode: 'shortest' | 'all' | 'any-shortest'; maxHops: number; edgeTypes: string[];
 }): Promise<GraphResult> {
   return requestJson<GraphResult>('/api/v1/graph/paths', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   });
 }
 
-export async function executeGraphQuery(query: string): Promise<GraphResult> {
+export async function executeGraphQuery(space: string, query: string): Promise<GraphResult> {
   return requestJson<GraphResult>('/api/v1/graph/query', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ space, query }),
   });
 }

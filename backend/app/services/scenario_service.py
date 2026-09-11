@@ -52,10 +52,10 @@ def list_scenarios() -> list[ScenarioTemplate]:
     return list(SCENARIOS.values())
 
 
-def _execute_graph(title: str, query: str, summary: list[SummaryItem] | None = None) -> GraphResult:
+def _execute_graph(title: str, space: str, query: str, summary: list[SummaryItem] | None = None) -> GraphResult:
     started = perf_counter()
     trace_id = uuid4().hex
-    response = get_client().execute(query)
+    response = get_client().execute_in_space(space, query)
     elapsed = int((perf_counter() - started) * 1000)
     if response.error_code != 0:
         raise ScenarioExecutionError(response.error_msg or "NebulaGraph 场景查询失败")
@@ -70,33 +70,30 @@ def _execute_graph(title: str, query: str, summary: list[SummaryItem] | None = N
     )
 
 
-def execute_loan_reflux(company_name: str) -> GraphResult:
+def execute_loan_reflux(space: str, company_name: str) -> GraphResult:
     safe_name = _escape_literal(company_name)
     query = f"""
-    USE anti_fraud_kg;
     MATCH p=(c:company)-[:holds_account]->(a:account)
            -[:transfer*1..5]->(p2:person)-[:controls]->(c)
     WHERE c.company.name == '{safe_name}'
     RETURN p LIMIT 50;
     """.strip()
-    return _execute_graph("贷款回流路径", query)
+    return _execute_graph("贷款回流路径", space, query)
 
 
-def execute_guarantee_circle(company_name: str) -> GraphResult:
+def execute_guarantee_circle(space: str, company_name: str) -> GraphResult:
     safe_name = _escape_literal(company_name)
     query = f"""
-    USE anti_fraud_kg;
     MATCH p=(c:company)-[:guarantees*2..6]->(c)
     WHERE c.company.name == '{safe_name}'
     RETURN p LIMIT 50;
     """.strip()
-    return _execute_graph("担保圈识别", query)
+    return _execute_graph("担保圈识别", space, query)
 
 
-def execute_lost_customer(company_name: str, lost_days: int) -> GraphResult:
+def execute_lost_customer(space: str, company_name: str, lost_days: int) -> GraphResult:
     safe_name = _escape_literal(company_name)
     query = f"""
-    USE anti_fraud_kg;
     MATCH p=(contact)-[:controls|employs|related_to*1..2]-(c:company)
     WHERE c.company.name == '{safe_name}'
       AND c.company.is_lost == true
@@ -105,6 +102,7 @@ def execute_lost_customer(company_name: str, lost_days: int) -> GraphResult:
     """.strip()
     return _execute_graph(
         "失联客户追踪",
+        space,
         query,
         [
             SummaryItem(key="失联主体", value=company_name),

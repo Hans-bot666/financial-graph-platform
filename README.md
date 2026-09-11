@@ -105,6 +105,8 @@ export NEBULA_PORT=9669
 export NEBULA_USER=root
 export NEBULA_PASSWORD=nebula
 export NEBULA_SPACE=anti_fraud_kg
+# 可选：额外可在探索分析中选择的图空间（逗号分隔）
+export NEBULA_EXTRA_SPACES=random_financial_graph_million
 
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
@@ -113,7 +115,10 @@ uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/health
+# 需登录后：GET /api/v1/graph/spaces 返回白名单图空间目录
 ```
+
+图空间选择说明见 `docs/spec/graph-space/` 与 `docs/guides/random-graph-10k.md`。
 
 - OpenAPI：<http://127.0.0.1:8000/docs>
 - API 基址：<http://127.0.0.1:8000/api/v1>
@@ -148,6 +153,7 @@ NEBULA_PORT=9669
 NEBULA_USER=root
 NEBULA_PASSWORD=请修改
 NEBULA_SPACE=anti_fraud_kg
+NEBULA_EXTRA_SPACES=random_financial_graph_million
 ```
 
 Linux 服务器上应将 `NEBULA_HOST` 改为 NebulaGraph 的内网地址或 Compose 服务名。

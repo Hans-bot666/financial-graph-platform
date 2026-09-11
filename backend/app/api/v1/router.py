@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.contracts import (
     FeatureCompileResult, FeatureDefinition, FeatureValidationResult,
-    GraphExpandRequest, GraphResult, GraphSchemaCatalog, PathFindRequest,
+    GraphExpandRequest, GraphResult, GraphSchemaCatalog, GraphSpaceSummary, PathFindRequest,
     ReadonlyQueryRequest, ScenarioExecuteRequest, ScenarioTemplate, VertexLookupRequest,
 )
 from app.core.query_policy import QueryPolicyError, enforce_readonly
@@ -27,6 +27,7 @@ from app.services.feature_service import (
     FeatureDefinitionError, compile_definition, delete_definition, get_definition,
     list_definitions, save_definition, validate_definition,
 )
+from app.services.graph_space_service import GraphSpaceError, list_graph_spaces, resolve_space
 from app.api.v1.auth_router import router as auth_router
 from app.api.v1.admin_router import router as admin_router
 from app.api.dependencies import require_permission
@@ -37,22 +38,35 @@ router.include_router(auth_router)
 router.include_router(admin_router)
 
 
+def _space_http_error(exc: GraphSpaceError) -> HTTPException:
+    status = {
+        "SPACE_REQUIRED": 422,
+        "SPACE_NOT_FOUND": 404,
+        "SPACE_FORBIDDEN": 403,
+        "SPACE_NOT_READY": 409,
+    }.get(exc.code, 400)
+    return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
+
+
+#图数据库健康检查
 @router.get("/health")
-async def health() -> dict[str, str]:
+async def health() -> dict[str, str | int]:
     client = get_client()
     response = client.execute("SHOW TAGS;")
     return {
         "status": "ok" if response.error_code == 0 else "degraded",
         "database": "connected" if response.error_code == 0 else "unavailable",
         "space": getattr(client, "space", "anti_fraud_kg"),
+        "catalogSize": len(list_graph_spaces()),
     }
 
-
+#特征工厂的api
 @router.get(
     "/features/definitions",
     response_model=list[FeatureDefinition],
     dependencies=[Depends(require_permission("feature.read"))],
 )
+
 async def feature_definitions() -> list[FeatureDefinition]:
     return list_definitions()
 
@@ -62,6 +76,7 @@ async def feature_definitions() -> list[FeatureDefinition]:
     response_model=FeatureDefinition,
     dependencies=[Depends(require_permission("feature.read"))],
 )
+
 async def feature_definition(definition_id: str) -> FeatureDefinition:
     try:
         return get_definition(definition_id)
@@ -74,6 +89,7 @@ async def feature_definition(definition_id: str) -> FeatureDefinition:
     response_model=FeatureDefinition,
     dependencies=[Depends(require_permission("feature.write", csrf=True))],
 )
+
 async def put_feature_definition(definition_id: str, definition: FeatureDefinition) -> FeatureDefinition:
     if definition_id != definition.id:
         raise HTTPException(status_code=409, detail="路径 ID 与特征定义 ID 不一致")
@@ -115,6 +131,15 @@ async def compile_feature_definition(definition: FeatureDefinition) -> FeatureCo
     except FeatureDefinitionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+#图数据库查询的api
+@router.get(
+    "/graph/spaces",
+    response_model=list[GraphSpaceSummary],
+    dependencies=[Depends(require_permission("graph.read"))],
+)
+async def graph_spaces() -> list[GraphSpaceSummary]:
+    return list_graph_spaces()
+
 
 @router.get(
     "/graph/schema",
@@ -132,7 +157,10 @@ async def graph_schema() -> GraphSchemaCatalog:
 )
 async def vertex_lookup(request: VertexLookupRequest) -> GraphResult:
     try:
-        return lookup_vertex(request.value.strip(), request.field, request.entity_type)
+        space = resolve_space(request.space).id
+        return lookup_vertex(space, request.value.strip(), request.field, request.entity_type)
+    except GraphSpaceError as exc:
+        raise _space_http_error(exc) from exc
     except ExplorationQueryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -144,7 +172,13 @@ async def vertex_lookup(request: VertexLookupRequest) -> GraphResult:
 )
 async def graph_expand(request: GraphExpandRequest) -> GraphResult:
     try:
-        return expand_vertex(request.vertex_id.strip(), request.min_hops, request.max_hops, request.edge_types, request.direction)
+        space = resolve_space(request.space).id
+        return expand_vertex(
+            space, request.vertex_id.strip(), request.min_hops, request.max_hops,
+            request.edge_types, request.direction,
+        )
+    except GraphSpaceError as exc:
+        raise _space_http_error(exc) from exc
     except ExplorationQueryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -156,11 +190,17 @@ async def graph_expand(request: GraphExpandRequest) -> GraphResult:
 )
 async def graph_paths(request: PathFindRequest) -> GraphResult:
     try:
-        return find_paths(request.start_id.strip(), request.end_id.strip(), request.mode, request.max_hops, request.edge_types)
+        space = resolve_space(request.space).id
+        return find_paths(
+            space, request.start_id.strip(), request.end_id.strip(),
+            request.mode, request.max_hops, request.edge_types,
+        )
+    except GraphSpaceError as exc:
+        raise _space_http_error(exc) from exc
     except ExplorationQueryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-
+#场景分析的api
 @router.get(
     "/scenarios",
     response_model=list[ScenarioTemplate],
@@ -180,7 +220,10 @@ async def run_loan_reflux(request: ScenarioExecuteRequest) -> GraphResult:
     if not isinstance(company_name, str) or not company_name.strip():
         raise HTTPException(status_code=422, detail="parameters.companyName 为必填字符串")
     try:
-        return execute_loan_reflux(company_name.strip())
+        space = resolve_space(request.space).id
+        return execute_loan_reflux(space, company_name.strip())
+    except GraphSpaceError as exc:
+        raise _space_http_error(exc) from exc
     except ScenarioExecutionError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -195,7 +238,10 @@ async def run_guarantee_circle(request: ScenarioExecuteRequest) -> GraphResult:
     if not isinstance(company_name, str) or not company_name.strip():
         raise HTTPException(status_code=422, detail="parameters.companyName 为必填字符串")
     try:
-        return execute_guarantee_circle(company_name.strip())
+        space = resolve_space(request.space).id
+        return execute_guarantee_circle(space, company_name.strip())
+    except GraphSpaceError as exc:
+        raise _space_http_error(exc) from exc
     except ScenarioExecutionError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -213,11 +259,14 @@ async def run_lost_customer(request: ScenarioExecuteRequest) -> GraphResult:
     if isinstance(lost_days, bool) or not isinstance(lost_days, int) or not 1 <= lost_days <= 3650:
         raise HTTPException(status_code=422, detail="parameters.lostDays 必须是 1-3650 的整数")
     try:
-        return execute_lost_customer(company_name.strip(), lost_days)
+        space = resolve_space(request.space).id
+        return execute_lost_customer(space, company_name.strip(), lost_days)
+    except GraphSpaceError as exc:
+        raise _space_http_error(exc) from exc
     except ScenarioExecutionError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-
+#图点边查询api
 @router.post(
     "/graph/query",
     response_model=GraphResult,
@@ -225,13 +274,16 @@ async def run_lost_customer(request: ScenarioExecuteRequest) -> GraphResult:
 )
 async def readonly_query(request: ReadonlyQueryRequest) -> GraphResult:
     try:
+        space = resolve_space(request.space).id
         query = enforce_readonly(request.query)
+    except GraphSpaceError as exc:
+        raise _space_http_error(exc) from exc
     except QueryPolicyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     trace_id = uuid4().hex
     started = perf_counter()
-    response = get_client().execute(query)
+    response = get_client().execute_in_space(space, query)
     elapsed = int((perf_counter() - started) * 1000)
     if response.error_code != 0:
         raise HTTPException(status_code=400, detail=response.error_msg)

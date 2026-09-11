@@ -31,10 +31,10 @@ def _edge_expression(edge_types: list[str]) -> str:
     return "|".join(selected)
 
 
-def _execute(title: str, query: str) -> GraphResult:
+def _execute(title: str, space: str, query: str) -> GraphResult:
     trace_id = uuid4().hex
     started = perf_counter()
-    response = get_client().execute(query)
+    response = get_client().execute_in_space(space, query)
     elapsed = int((perf_counter() - started) * 1000)
     if response.error_code != 0:
         raise ExplorationQueryError(response.error_msg)
@@ -46,7 +46,7 @@ def _execute(title: str, query: str) -> GraphResult:
     )
 
 
-def lookup_vertex(value: str, field: str, entity_type: str | None) -> GraphResult:
+def lookup_vertex(space: str, value: str, field: str, entity_type: str | None) -> GraphResult:
     if entity_type and entity_type not in ENTITY_TYPES:
         raise ExplorationQueryError(f"不支持的实体类型：{entity_type}")
     if field == "id":
@@ -55,10 +55,12 @@ def lookup_vertex(value: str, field: str, entity_type: str | None) -> GraphResul
         if not entity_type:
             raise ExplorationQueryError("按名称查询时必须选择实体类型")
         query = f"MATCH (v:{entity_type}) WHERE v.{entity_type}.name == {_literal(value)} RETURN v LIMIT 20;"
-    return _execute("实体查询", query)
+    return _execute("实体查询", space, query)
 
 
-def expand_vertex(vertex_id: str, min_hops: int, max_hops: int, edge_types: list[str], direction: str) -> GraphResult:
+def expand_vertex(
+    space: str, vertex_id: str, min_hops: int, max_hops: int, edge_types: list[str], direction: str,
+) -> GraphResult:
     if min_hops > max_hops:
         raise ExplorationQueryError("最小跳数不能大于最大跳数")
     edge_expr = _edge_expression(edge_types)
@@ -68,10 +70,12 @@ def expand_vertex(vertex_id: str, min_hops: int, max_hops: int, edge_types: list
         "both": f"(s)-[:{edge_expr}*{min_hops}..{max_hops}]-(t)",
     }[direction]
     query = f"MATCH p={pattern} WHERE id(s) == {_literal(vertex_id)} RETURN p LIMIT 200;"
-    return _execute(f"{min_hops}-{max_hops} 跳关系展开", query)
+    return _execute(f"{min_hops}-{max_hops} 跳关系展开", space, query)
 
 
-def find_paths(start_id: str, end_id: str, mode: str, max_hops: int, edge_types: list[str]) -> GraphResult:
+def find_paths(
+    space: str, start_id: str, end_id: str, mode: str, max_hops: int, edge_types: list[str],
+) -> GraphResult:
     # FIND PATH 的 OVER 类型列表使用逗号；MATCH 边标签表达式使用竖线。
     edge_expr = _edge_expression(edge_types).replace("|", ",")
     keyword = "ALL PATH" if mode == "all" else "SHORTEST PATH"
@@ -80,4 +84,4 @@ def find_paths(start_id: str, end_id: str, mode: str, max_hops: int, edge_types:
         f"FIND {keyword} WITH PROP FROM {_literal(start_id)} TO {_literal(end_id)} "
         f"OVER {edge_expr} UPTO {max_hops} STEPS YIELD path AS p{suffix};"
     )
-    return _execute("路径分析", query)
+    return _execute("路径分析", space, query)

@@ -26,7 +26,7 @@ from config import (
 router = APIRouter(prefix="/auth", tags=["authentication"])
 CSRF_COOKIE_NAME = "fgp_csrf"
 
-
+#数据结构效验
 class RegisterRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=256)
@@ -54,7 +54,7 @@ def _auth_error(error: AuthError, trace_id: str) -> JSONResponse:
         headers={"X-Request-ID": trace_id},
     )
 
-
+#用户注册配置
 @router.get("/config")
 async def auth_config() -> dict[str, object]:
     return {
@@ -63,7 +63,7 @@ async def auth_config() -> dict[str, object]:
         "password": {"minLength": 12, "maxLength": 128},
     }
 
-
+#跨域检查+login/register api
 @router.post("/register", status_code=201)
 async def register(payload: RegisterRequest, request: Request) -> Response:
     trace_id, ip, user_agent = _request_context(request)

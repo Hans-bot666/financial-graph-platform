@@ -7,6 +7,8 @@ NEBULA_PORT = int(os.getenv("NEBULA_PORT", "9669"))
 NEBULA_USER = os.getenv("NEBULA_USER", "root")
 NEBULA_PASSWORD = os.getenv("NEBULA_PASSWORD", "nebula")
 NEBULA_SPACE = os.getenv("NEBULA_SPACE", "anti_fraud_kg")
+# 逗号分隔的额外可查询图空间白名单（不含默认 NEBULA_SPACE，会自动去重合并）
+NEBULA_EXTRA_SPACES = os.getenv("NEBULA_EXTRA_SPACES", "")
 
 # 连接池配置
 NEBULA_POOL_MIN = int(os.getenv("NEBULA_POOL_MIN", "1"))
