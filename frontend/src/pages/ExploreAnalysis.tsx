@@ -20,7 +20,7 @@ const NODE_COLORS: Record<string, string> = {
   company: '#22C897', person: '#4B96FF', account: '#F59E0B', loan: '#A855F7', default: '#64748B',
 };
 const DEFAULT_EDGES = ['holds_account', 'applied_for', 'disbursed_to', 'transfer', 'guarantees', 'controls', 'shareholder', 'employs', 'related_to'];
-const GQL_EXAMPLE = 'MATCH p=(c:company)-[:holds_account]->(a:account) RETURN p LIMIT 20;';
+const GQL_EXAMPLE = 'MATCH p=(c:company)-[:holds_account]->(a:account) RETURN p LIMIT 20';
 
 type Module = 'custom' | 'scenario' | 'gql';
 type CustomTool = 'lookup' | 'expand' | 'path';
@@ -178,6 +178,29 @@ const ExploreAnalysis: React.FC<ExploreAnalysisProps> = ({ targetSceneBoardId, i
     setLastResult(null);
   };
 
+  const refreshSpaces = () => {
+    listGraphSpaces().then((spaces) => {
+      setGraphSpaces(spaces);
+      setSpacesError(null);
+      const ready = spaces.filter((item) => item.status === 'ready');
+      setActiveSpaceId((current) => {
+        const next =
+          ready.find((item) => item.id === current)?.id
+          ?? ready.find((item) => item.isDefault)?.id
+          ?? ready[0]?.id
+          ?? '';
+        if (next) localStorage.setItem(ACTIVE_SPACE_KEY, next);
+        return next;
+      });
+    }).catch((error) => {
+      const message = error instanceof Error ? error.message : '分析目录加载失败';
+      setSpacesError(message);
+      setGraphSpaces([]);
+      setActiveSpaceId('');
+      toast.error(message);
+    });
+  };
+
   const consume = async (request: Promise<GraphResult>, merge = false, highlight = false) => {
     setBusy(true);
     try {
@@ -211,7 +234,10 @@ const ExploreAnalysis: React.FC<ExploreAnalysisProps> = ({ targetSceneBoardId, i
       <aside className="flex w-[340px] min-w-[300px] shrink-0 flex-col overflow-hidden border-r bg-white">
         <div className="shrink-0 border-b px-4 py-3"><div className="text-sm font-semibold">探索分析</div><div className="mt-0.5 text-[11px] text-muted-foreground">实体检索、关系展开、路径研判与场景分析</div></div>
         <div className="shrink-0 border-b bg-secondary/30 px-3 py-2">
-          <FieldLabel>当前分析图</FieldLabel>
+          <div className="flex items-center justify-between">
+            <FieldLabel>当前分析图</FieldLabel>
+            <button type="button" className="mb-1.5 text-[10px] text-primary" onClick={refreshSpaces}>刷新</button>
+          </div>
           <select
             aria-label="当前分析图"
             value={activeSpaceId}
@@ -220,7 +246,7 @@ const ExploreAnalysis: React.FC<ExploreAnalysisProps> = ({ targetSceneBoardId, i
             disabled={graphSpaces.length === 0}
           >
             {graphSpaces.length === 0 ? (
-              <option value="">暂无可用图空间</option>
+              <option value="">暂无可用图</option>
             ) : (
               graphSpaces.map((space) => (
                 <option key={space.id} value={space.id} disabled={space.status !== 'ready'}>
@@ -234,7 +260,7 @@ const ExploreAnalysis: React.FC<ExploreAnalysisProps> = ({ targetSceneBoardId, i
               ? spacesError
               : activeSpace
                 ? `${activeSpace.vertexCount ?? '—'} 节点 · ${activeSpace.edgeCount ?? '—'} 边 · ${activeSpace.status}`
-                : '请选择已登记且就绪的图空间'}
+                : '请选择图数据库中的可用图'}
           </div>
         </div>
         <Tabs value={module} onValueChange={(v) => setModule(v as Module)} className="flex min-h-0 flex-1 flex-col">

@@ -161,17 +161,18 @@ def _compile_ngql(nodes: list, entity_type: str) -> str:
     max_hop = _as_int(path.config.get("maxHop"), 1)
     direction = str(path.config.get("direction", "双向"))
     edge_expr = "|".join(edge_types)
+    hops = f"{{{min_hop},{max_hop}}}"
     pattern = {
-        "出边": f"(s:{entity_type})-[:{edge_expr}*{min_hop}..{max_hop}]->(t)",
-        "out": f"(s:{entity_type})-[:{edge_expr}*{min_hop}..{max_hop}]->(t)",
-        "入边": f"(s:{entity_type})<-[:{edge_expr}*{min_hop}..{max_hop}]-(t)",
-        "in": f"(s:{entity_type})<-[:{edge_expr}*{min_hop}..{max_hop}]-(t)",
-        "双向": f"(s:{entity_type})-[:{edge_expr}*{min_hop}..{max_hop}]-(t)",
-        "both": f"(s:{entity_type})-[:{edge_expr}*{min_hop}..{max_hop}]-(t)",
+        "出边": f"(s:{entity_type})-[:{edge_expr}]->{hops}(t)",
+        "out": f"(s:{entity_type})-[:{edge_expr}]->{hops}(t)",
+        "入边": f"(s:{entity_type})<-[:{edge_expr}]-{hops}(t)",
+        "in": f"(s:{entity_type})<-[:{edge_expr}]-{hops}(t)",
+        "双向": f"(s:{entity_type})-[:{edge_expr}]-{hops}(t)",
+        "both": f"(s:{entity_type})-[:{edge_expr}]-{hops}(t)",
     }.get(direction)
     if pattern is None:
         raise FeatureDefinitionError("路径方向仅支持出边、入边或双向")
-    predicates = ["id(s) == $entityKey"]
+    predicates = ["s.id = $entityKey"]
     for node in (item for item in nodes if item.kind == "filter"):
         field = str(node.config.get("field", ""))
         operator = str(node.config.get("operator", ""))
@@ -190,13 +191,13 @@ def _compile_ngql(nodes: list, entity_type: str) -> str:
         else:
             raise FeatureDefinitionError(f"「{node.title}」字段或操作符不受支持")
     aggregate = next((node for node in nodes if node.kind == "aggregate"), None)
-    expression = "count(DISTINCT id(t))"
+    expression = "count(DISTINCT t.id)"
     if aggregate:
         function = str(aggregate.config.get("function", "COUNT DISTINCT")).upper()
         if function not in {"COUNT", "COUNT DISTINCT"}:
             raise FeatureDefinitionError("首期在线聚合仅支持 COUNT 和 COUNT DISTINCT")
-        expression = "count(DISTINCT id(t))" if function == "COUNT DISTINCT" else "count(id(t))"
-    return f"MATCH p={pattern} WHERE {' AND '.join(predicates)} RETURN {expression} AS feature_value LIMIT 1;"
+        expression = "count(DISTINCT t.id)" if function == "COUNT DISTINCT" else "count(t.id)"
+    return f"MATCH p={pattern} WHERE {' AND '.join(predicates)} RETURN {expression} AS feature_value LIMIT 1"
 
 
 def _csv(value: object) -> list[str]:

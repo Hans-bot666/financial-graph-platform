@@ -1,36 +1,62 @@
 import React, { useEffect, useState } from 'react';
-import type { TabKey } from '@/types/index';
-import { cn } from '@/lib/utils';
+import type { GraphData, TabKey } from '@/types/index';
 import { getServiceHealth } from '@/services/graph-api';
-import { LogOut, UserRound, Users } from 'lucide-react';
+import { LogOut, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import GlobalSearch from './GlobalSearch';
 
 interface TopNavProps {
   activeTab: TabKey;
-  onTabChange: (tab: TabKey) => void;
+  onOpenScene: (sceneBoardId: string) => void;
+  onOpenSubGraph: (sceneBoardId: string, graphData: GraphData) => void;
 }
 
-interface NavTab {
-  key: TabKey;
-  label: string;
-}
+const TAB_TITLE: Record<TabKey, string> = {
+  home: '场景看板',
+  model: '模型构建',
+  data: '数据接入',
+  explore: '探索分析',
+  feature: '特征工厂',
+  admin: '用户管理',
+};
 
-const NAV_TABS: NavTab[] = [
-  { key: 'home', label: '首页看板' },
-  { key: 'model', label: '模型构建' },
-  { key: 'data', label: '数据接入' },
-  { key: 'explore', label: '探索分析' },
-  { key: 'feature', label: '特征工厂' },
-];
+const ROLE_LABELS: Record<string, string> = {
+  platform_admin: '平台管理员',
+  analyst: '分析员',
+  viewer: '查看者',
+};
 
-const TopNav: React.FC<TopNavProps> = ({ activeTab, onTabChange }) => {
-  const { user, signOut, hasPermission } = useAuth();
+const ROLE_PRIORITY = ['platform_admin', 'analyst', 'viewer'];
+
+const TopNav: React.FC<TopNavProps> = ({ activeTab, onOpenScene, onOpenSubGraph }) => {
+  const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const [connected,setConnected]=useState(false);
-  const [space,setSpace]=useState('未连接');
-  useEffect(()=>{let live=true;const check=()=>getServiceHealth().then(value=>{if(live){setConnected(value.database==='connected');setSpace(value.space);}}).catch(()=>{if(live){setConnected(false);setSpace('服务不可用');}});void check();const timer=window.setInterval(check,30000);return()=>{live=false;window.clearInterval(timer);};},[]);
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    const check = () =>
+      getServiceHealth()
+        .then((value) => {
+          if (live) {
+            setConnected(value.database === 'connected');
+          }
+        })
+        .catch(() => {
+          if (live) {
+            setConnected(false);
+          }
+        });
+    void check();
+    const timer = window.setInterval(check, 30_000);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const handleSignOut = async () => {
     try {
       await signOut();
@@ -39,72 +65,54 @@ const TopNav: React.FC<TopNavProps> = ({ activeTab, onTabChange }) => {
     }
     navigate('/login', { replace: true });
   };
+
+  const roles = user?.roles ?? [];
+  const primaryRole = ROLE_PRIORITY.find((role) => roles.includes(role)) ?? roles[0];
+  const primaryRoleLabel = primaryRole ? ROLE_LABELS[primaryRole] ?? primaryRole : '未分配角色';
+  const allRoleLabels = roles.map((role) => ROLE_LABELS[role] ?? role).join('、') || '未分配角色';
+
   return (
-    <header className="bg-white border-b border-border sticky top-0 z-50">
-      <div className="flex items-center h-12 px-6 gap-8">
-        {/* Logo */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <circle cx="4" cy="4" r="2" fill="white" opacity="0.9" />
-              <circle cx="12" cy="4" r="2" fill="white" opacity="0.9" />
-              <circle cx="8" cy="12" r="2" fill="white" opacity="0.9" />
-              <line x1="4" y1="4" x2="12" y2="4" stroke="white" strokeWidth="1" opacity="0.6" />
-              <line x1="4" y1="4" x2="8" y2="12" stroke="white" strokeWidth="1" opacity="0.6" />
-              <line x1="12" y1="4" x2="8" y2="12" stroke="white" strokeWidth="1" opacity="0.6" />
-            </svg>
+    <header className="sticky top-0 z-50 border-b border-border bg-white">
+      <div className="grid h-12 grid-cols-[minmax(9rem,1fr)_minmax(18rem,36rem)_minmax(18rem,1fr)] items-center gap-4 px-6">
+        <div className="min-w-0">
+          <div className="truncate text-sm text-muted-foreground">
+            工作台
+            <span className="mx-1.5 text-border">/</span>
+            <span className="font-medium text-foreground">{TAB_TITLE[activeTab]}</span>
           </div>
-          <span className="font-semibold text-foreground text-sm tracking-wide">图谱应用平台</span>
         </div>
 
-        {/* 分隔线 */}
-        <div className="w-px h-5 bg-border shrink-0" />
+        <div className="flex min-w-0 justify-center">
+          <GlobalSearch onOpenScene={onOpenScene} onOpenSubGraph={onOpenSubGraph} />
+        </div>
 
-        {/* 导航页签 */}
-        <nav className="flex items-center gap-1 flex-1">
-          {NAV_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => onTabChange(tab.key)}
-              className={cn(
-                'relative px-4 py-2 text-sm font-medium rounded-md transition-all duration-150',
-                activeTab === tab.key
-                  ? 'text-primary bg-accent'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
-              )}
+        <div className="flex min-w-0 items-center justify-end gap-2">
+          <div
+            className={`flex items-center gap-1.5 rounded border px-2 py-1 ${
+              connected ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'
+            }`}
+          >
+            <div
+              className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-green-500 pulse-dot' : 'bg-amber-500'}`}
+            />
+            <span
+              className={`text-xs font-medium ${connected ? 'text-green-700' : 'text-amber-700'}`}
             >
-              {activeTab === tab.key && (
-                <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-primary rounded-full" />
-              )}
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-
-        {/* 右侧状态 */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className={`flex items-center gap-1.5 rounded border px-2 py-1 ${connected?'border-green-200 bg-green-50':'border-amber-200 bg-amber-50'}`}>
-            <div className={`h-1.5 w-1.5 rounded-full ${connected?'bg-green-500 pulse-dot':'bg-amber-500'}`} />
-            <span className={`text-xs font-medium ${connected?'text-green-700':'text-amber-700'}`}>{connected?'已连接':'未连接'}</span>
+              {connected ? '已连接' : '未连接'}
+            </span>
           </div>
-          <span className="text-xs text-muted-foreground">{space}</span>
-          {hasPermission('user.read') && (
-            <button
-              type="button"
-              onClick={() => navigate('/admin/users')}
-              className="ml-1 flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              <Users className="h-4 w-4" />
-              用户管理
-            </button>
-          )}
           <div className="mx-1 h-5 w-px bg-border" />
-          <div className="flex items-center gap-1.5 text-xs text-foreground" title={`@${user?.username ?? ''}`}>
+          <div
+            className="flex min-w-0 items-center gap-1.5 text-xs text-foreground"
+            title={`@${user?.username ?? ''} · ${allRoleLabels}`}
+          >
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-primary">
               <UserRound className="h-3.5 w-3.5" />
             </span>
-            <span className="max-w-24 truncate">{user?.displayName ?? user?.username}</span>
+            <span className="min-w-0 leading-tight">
+              <span className="block max-w-24 truncate">{user?.displayName ?? user?.username}</span>
+              <span className="block max-w-24 truncate text-[10px] text-muted-foreground">{primaryRoleLabel}</span>
+            </span>
           </div>
           <button
             type="button"

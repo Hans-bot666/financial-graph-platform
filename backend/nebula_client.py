@@ -23,16 +23,21 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-# 尝试导入 nebula3-python；如未安装，则全程走 Mock
+
+def to_gql(statement: str) -> str:
+    """NebulaGraph 5.x GQL 不接受 nGQL 风格的语句结束分号。"""
+    return statement.strip().rstrip(";").strip()
+
+# 尝试导入 NebulaGraph 5.x Python SDK；如未安装，则全程走 Mock。
 try:
-    from nebula3.gclient.net import ConnectionPool
-    from nebula3.common import ttypes
+    from nebulagraph_python import NebulaPool as SdkNebulaPool
+    from nebulagraph_python import NebulaPoolConfig
 
     NEBULA_AVAILABLE = True
 except Exception as exc:  # pragma: no cover
-    logger.warning("nebula3-python 未安装或导入失败：%s", exc)
-    ConnectionPool = None  # type: ignore
-    ttypes = None  # type: ignore
+    logger.warning("nebula5-python 未安装或导入失败：%s", exc)
+    SdkNebulaPool = None  # type: ignore[assignment]
+    NebulaPoolConfig = None  # type: ignore[assignment,misc]
     NEBULA_AVAILABLE = False
 
 
@@ -47,54 +52,29 @@ class GraphResult:
     is_mock: bool = False
 
 
-def _value_to_py(value: Any) -> Any:
-    """把 Nebula Graph Value 对象递归转换为 Python 原生类型。"""
-    if value is None:
-        return None
+def _result_to_graph_result(result: Any) -> GraphResult:
+    """把 nebula5-python ResultSet 转为项目稳定使用的返回结构。"""
+    succeeded = getattr(result, "is_succeeded", False)
+    if callable(succeeded):
+        succeeded = succeeded()
 
-    if hasattr(value, "getType"):
-        try:
-            from nebula3.common.ttypes import Value
-        except Exception:
-            return str(value)
+    status_code = str(getattr(result, "status_code", "") or "")
+    status_message = str(getattr(result, "status_message", "") or "")
+    if not succeeded:
+        message = f"[{status_code}] {status_message}".strip() if status_code else status_message
+        return GraphResult(-1, message or "NebulaGraph 查询失败", [], [])
 
-        vt = value.getType()
-        if vt == Value.NVAL:
-            return None
-        if vt == Value.BVAL:
-            return value.get_bVal()
-        if vt == Value.IVAL:
-            return value.get_iVal()
-        if vt == Value.SVAL:
-            return value.get_sVal().decode("utf-8") if isinstance(value.get_sVal(), bytes) else value.get_sVal()
-        if vt == Value.FVAL:
-            return value.get_fVal()
-        if vt == Value.DVAL:
-            return value.get_dVal()
-        if vt == Value.LVAL:
-            return [_value_to_py(v) for v in value.get_lVal().values]
-        if vt == Value.MVAL:
-            return {k.decode("utf-8") if isinstance(k, bytes) else k: _value_to_py(v) for k, v in value.get_mVal().kvs.items()}
-        if vt == Value.VVAL:
-            return [_value_to_py(v) for v in value.get_vVal().values]
-        if vt == Value.EVAL:
-            return value.get_eVal()
-        if vt == Value.PVAL:
-            return value.get_pVal()
-        if vt == Value.GVAL:
-            return value.get_gVal()
-        return str(value)
-
-    # 已是 Python 原生类型
-    return value
+    column_names = [str(name) for name in getattr(result, "column_names", [])]
+    primitive_rows = result.as_primitive_by_row()
+    rows = [[row.get(name) for name in column_names] for row in primitive_rows]
+    return GraphResult(0, "", column_names, rows)
 
 
 class NebulaClient:
-    """Nebula Graph 连接池客户端。"""
+    """NebulaGraph 5.x 连接池适配器。"""
 
     def __init__(self) -> None:
         self.pool: Any = None
-        self.session: Any = None
         self._mock = False
         self.space = NEBULA_SPACE
         self._lock = threading.RLock()
@@ -107,19 +87,36 @@ class NebulaClient:
             return
 
         try:
-            self.pool = ConnectionPool()
-            ok = self.pool.init(
-                [(NEBULA_HOST, NEBULA_PORT)],
-                self._config(),
+            request_timeout_ms = NEBULA_TIMEOUT if NEBULA_TIMEOUT > 0 else 30_000
+            # 5.x 连接池若在初始化时指定 graph，会立刻执行 SESSION SET GRAPH。
+            # 图尚未创建时会把整个连接池打空，因此先连上 catalog，再按查询切换 Graph。
+            config = NebulaPoolConfig(
+                addresses=f"{NEBULA_HOST}:{NEBULA_PORT}",
+                user_name=NEBULA_USER,
+                password=NEBULA_PASSWORD,
+                min_client_size=NEBULA_POOL_MIN,
+                max_client_size=NEBULA_POOL_MAX,
+                request_timeout_ms=request_timeout_ms,
             )
-            if not ok:
-                raise RuntimeError("连接池初始化失败")
-            self.session = self.pool.get_session(NEBULA_USER, NEBULA_PASSWORD)
-            self.session.execute(f"USE {NEBULA_SPACE};")
+            self.pool = SdkNebulaPool(config)
+            probe = self._execute_sdk("RETURN 1 AS ok")
+            if probe.error_code != 0:
+                raise RuntimeError(probe.error_msg)
             self.space = NEBULA_SPACE
-            logger.info("已连接 Nebula Graph %s:%s / space=%s", NEBULA_HOST, NEBULA_PORT, NEBULA_SPACE)
+            graph_probe = self._execute_sdk("RETURN 1 AS ok", NEBULA_SPACE)
+            if graph_probe.error_code != 0:
+                logger.warning(
+                    "已连接 NebulaGraph 5.x %s:%s，但 Graph `%s` 尚未就绪：%s。"
+                    "请先按 schema.ngql 创建 Graph Type 和 Graph。",
+                    NEBULA_HOST,
+                    NEBULA_PORT,
+                    NEBULA_SPACE,
+                    graph_probe.error_msg,
+                )
+            else:
+                logger.info("已连接 NebulaGraph 5.x %s:%s / graph=%s", NEBULA_HOST, NEBULA_PORT, NEBULA_SPACE)
         except Exception as exc:
-            logger.warning("连接 Nebula Graph 失败：%s，回退到 Mock 模式。", exc)
+            logger.warning("连接 NebulaGraph 失败：%s，回退到 Mock 模式。", exc)
             self._mock = True
             if self.pool:
                 try:
@@ -127,16 +124,6 @@ class NebulaClient:
                 except Exception:
                     pass
             self.pool = None
-            self.session = None
-
-    def _config(self) -> Any:
-        from nebula3.Config import Config
-
-        config = Config()
-        config.min_connection_pool_size = NEBULA_POOL_MIN
-        config.max_connection_pool_size = NEBULA_POOL_MAX
-        config.timeout = NEBULA_TIMEOUT
-        return config
 
     def close(self) -> None:
         if self.pool:
@@ -145,68 +132,54 @@ class NebulaClient:
             except Exception:
                 pass
         self.pool = None
-        self.session = None
 
     def execute(self, ngql: str) -> GraphResult:
-        """执行 nGQL 并返回统一结构。调用方若需指定空间，应使用 execute_in_space。"""
+        """执行 GQL 并返回统一结构。调用方若需指定 Graph，应使用 execute_in_space。"""
         if self._mock:
             return self._mock_execute(ngql)
 
-        if not self.session:
-            return GraphResult(-1, "session 未初始化", [], [])
+        return self._execute_sdk(ngql, self.space)
 
+    def list_graphs(self) -> GraphResult:
+        """列出 catalog 中的 Graph。不得预选业务 Graph。"""
+        if self._mock:
+            return GraphResult(0, "", ["Name"], [["anti_fraud_kg"]], is_mock=True)
+        with self._lock:
+            return self._execute_sdk("SHOW GRAPHS")
+
+    def _execute_sdk(self, ngql: str, space: str | None = None) -> GraphResult:
+        """从 5.x 池借出客户端，并确保 SESSION SET GRAPH 与查询在同一会话执行。"""
+        if not self.pool:
+            return GraphResult(-1, "NebulaGraph 连接池未初始化", [], [])
+
+        client: Any = None
         try:
-            resp = self.session.execute(ngql)
+            client = self.pool.get_client()
+            if space:
+                use_result = _result_to_graph_result(client.execute(to_gql(f"SESSION SET GRAPH {space}")))
+                if use_result.error_code != 0:
+                    return use_result
+            return _result_to_graph_result(client.execute(to_gql(ngql)))
         except Exception as exc:
             logger.exception("执行 nGQL 异常：%s", exc)
             return GraphResult(-1, f"执行异常: {exc}", [], [])
-
-        # nebula3-python 3.8 exposes these as methods, while older releases
-        # exposed thrift-style attributes. Support both result shapes.
-        error_code_attr = getattr(resp, "error_code", -1)
-        error_code = error_code_attr() if callable(error_code_attr) else error_code_attr
-        error_msg_attr = getattr(resp, "error_msg", b"")
-        error_msg = error_msg_attr() if callable(error_msg_attr) else error_msg_attr
-        if isinstance(error_msg, bytes):
-            error_msg = error_msg.decode("utf-8")
-        error_msg = error_msg or ""
-
-        if error_code != 0:
-            return GraphResult(error_code, error_msg, [], [])
-
-        try:
-            # Current SDKs provide a stable Python-native representation.
-            if hasattr(resp, "as_primitive") and hasattr(resp, "keys"):
-                column_names = list(resp.keys())
-                primitive_rows = resp.as_primitive()
-                rows = [[row.get(name) for name in column_names] for row in primitive_rows]
-                return GraphResult(0, "", column_names, rows)
-
-            # Compatibility fallback for older thrift-style ResultSet objects.
-            data_set = resp.data
-            if data_set is None:
-                return GraphResult(0, "", [], [])
-
-            column_names = [c.decode("utf-8") if isinstance(c, bytes) else c for c in data_set.column_names]
-            rows = []
-            for row in data_set.rows:
-                rows.append([_value_to_py(v) for v in row.values])
-            return GraphResult(0, "", column_names, rows)
-        except Exception as exc:
-            logger.exception("解析结果异常：%s", exc)
-            return GraphResult(-1, f"解析异常: {exc}", [], [])
+        finally:
+            if client is not None:
+                try:
+                    self.pool.return_client(client)
+                except Exception:
+                    logger.exception("归还 NebulaGraph 客户端到连接池失败")
 
     def execute_in_space(self, space: str, ngql: str) -> GraphResult:
-        """在指定图空间执行查询；持锁保证并发请求不串空间。
+        """在指定 Graph 执行查询；持锁保证并发请求不串 Graph。
 
-        `space` 必须已由上层白名单校验通过。
+        `space` 必须已由上层目录校验通过。在 NebulaGraph 5.x 中表示 Graph 名。
         """
         with self._lock:
-            use_result = self.execute(f"USE {space};")
-            if use_result.error_code != 0:
-                return use_result
             self.space = space
-            return self.execute(ngql)
+            if self._mock:
+                return self._mock_execute(ngql)
+            return self._execute_sdk(ngql, space)
 
     # ------------------------------------------------------------------
     # Mock 实现：用于无 Nebula 环境演示
@@ -219,7 +192,9 @@ class NebulaClient:
             return self._mock_fund_flow()
         if "lost" in lower:
             return self._mock_lost_customer()
-        if "anti_fraud_kg" in lower and "use " in lower:
+        if "show graphs" in lower:
+            return GraphResult(0, "", ["Name"], [["anti_fraud_kg"]], is_mock=True)
+        if "anti_fraud_kg" in lower and ("use " in lower or "session set graph" in lower):
             return GraphResult(0, "", [], [["OK"]])
         return GraphResult(0, "", ["message"], [["Mock 查询成功：" + ngql[:80]]])
 

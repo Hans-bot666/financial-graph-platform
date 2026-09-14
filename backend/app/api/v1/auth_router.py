@@ -102,7 +102,7 @@ async def register(payload: RegisterRequest, request: Request) -> Response:
 async def login(payload: LoginRequest, request: Request) -> Response:
     trace_id, ip, user_agent = _request_context(request)
     origin = request.headers.get("origin")
-    if origin and origin not in CORS_ORIGINS:
+    if origin and origin not in  CORS_ORIGINS:
         return _auth_error(AuthError("ORIGIN_INVALID", "请求来源校验失败", 403), trace_id)
     try:
         user, session_token, csrf_token = login_user(

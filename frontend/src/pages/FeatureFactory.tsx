@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Boxes, BrainCircuit, ChevronRight, CircleDot, Code2, GitBranch, GripVertical, Network, Save, Search, ShieldCheck, Sparkles, Trash2, Waypoints } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { listGraphInstances } from '@/services/ingestion-store';
+import { listGraphSpaces, type GraphSpaceSummary } from '@/services/graph-api';
 import { compileFeatureDefinitionRemote, compileFeatureIR, defaultLifecycle, deleteFeatureDefinition, type FeatureDefinition, type FeatureFlowEdge, type FeatureOperator, type FeatureOperatorKind, listFeatureDefinitions, operatorPorts, portsCompatible, saveFeatureDefinition, saveFeatureDefinitionRemote, validateFeatureDefinition, validateFeatureDefinitionRemote } from '@/services/feature-store';
 
 type PageTab='builder'|'catalog';
@@ -43,11 +43,12 @@ const FeatureFactory:React.FC=()=>{
   const [preview,setPreview]=useState('');
   const [serviceMode,setServiceMode]=useState<'backend'|'local'>('local');
   const [search,setSearch]=useState('');
-  const [graphId,setGraphId]=useState(()=>listGraphInstances().find(g=>g.status==='ready')?.id??'builtin-anti-fraud');
+  const [graphId,setGraphId]=useState('');
+  const [graphs,setGraphs]=useState<GraphSpaceSummary[]>([]);
   const selected=nodes.find(node=>node.id===selectedId)??null;
-  const graphs=listGraphInstances().filter(g=>g.status==='ready');
   const visibleFeatures=definitions.filter(feature=>`${feature.name}${feature.id}${feature.entityType}`.toLowerCase().includes(search.toLowerCase()));
   const current=definitions.find(item=>item.id===definitionId);
+  useEffect(()=>{listGraphSpaces().then(spaces=>{const ready=spaces.filter(space=>space.status==='ready');setGraphs(ready);setGraphId(current=>ready.find(space=>space.id===current)?.id??ready.find(space=>space.isDefault)?.id??ready[0]?.id??'');}).catch(error=>{toast.error(error instanceof Error?error.message:'图目录加载失败');setGraphs([]);setGraphId('');});},[]);
   const snapshot=():FeatureDefinition=>({id:definitionId,name:definitionName,graphInstanceId:graphId,entityType:String(nodes.find(node=>node.kind==='input')?.config.label??'entity'),version:current?.version??1,status:current?.status??'draft',nodes,edges,updatedAt:new Date().toISOString(),lifecycle:current?.lifecycle??defaultLifecycle()});
   const persist=async()=>{if(!definitionName.trim()){toast.error('请输入特征名称');return;}const value=snapshot();saveFeatureDefinition(value);setDefinitions(listFeatureDefinitions());try{await saveFeatureDefinitionRemote(value);setServiceMode('backend');toast.success('特征草稿已保存到平台服务');}catch{setServiceMode('local');toast.warning('后端暂不可用，草稿已安全保存到本地');}};
   const loadDefinition=(definition:FeatureDefinition)=>{setDefinitionId(definition.id);setDefinitionName(definition.name);setGraphId(definition.graphInstanceId);setNodes(definition.nodes);setEdges(definition.edges);setSelectedId(definition.nodes[0]?.id??'');setPreview('');};
@@ -75,7 +76,7 @@ const FeatureFactory:React.FC=()=>{
     {tab==='builder'&&<div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b bg-white px-4">
         <Input value={definitionName} onChange={event=>setDefinitionName(event.target.value)} className="h-8 w-64 text-xs font-medium" />
-        <select value={graphId} onChange={event=>setGraphId(event.target.value)} className="h-8 rounded-md border bg-white px-2 text-xs"><option value="builtin-anti-fraud">反欺诈示例图</option>{graphs.map(graph=><option key={graph.id} value={graph.id}>{graph.name}</option>)}</select>
+        <select value={graphId} onChange={event=>setGraphId(event.target.value)} className="h-8 rounded-md border bg-white px-2 text-xs" disabled={graphs.length===0}>{graphs.length===0?<option value="">暂无可用图</option>:graphs.map(graph=><option key={graph.id} value={graph.id}>{graph.displayName} · {graph.id}</option>)}</select>
         <Badge variant="outline">规则特征</Badge><Badge variant="secondary">草稿 v3</Badge><Badge variant={serviceMode==='backend'?'default':'outline'}>{serviceMode==='backend'?'服务端校验':'本地降级'}</Badge>
         <div className="ml-auto flex gap-2"><Button size="sm" variant="outline" onClick={persist}><Save className="mr-1 h-3.5 w-3.5"/>保存草稿</Button><Button size="sm" variant="outline" onClick={validate}><ShieldCheck className="mr-1 h-3.5 w-3.5"/>校验</Button><Button size="sm" variant="outline" onClick={compile}><Code2 className="mr-1 h-3.5 w-3.5"/>编译预览</Button></div>
       </div>

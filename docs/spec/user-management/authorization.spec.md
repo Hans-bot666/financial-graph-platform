@@ -54,7 +54,7 @@ FastAPI 必须提供集中式 `require_authenticated_user` 和 `require_permissi
 
 ### UM-AUTHZ-004 用户列表（P0）
 
-拥有 `user.read` 的管理员可访问 `/admin/users`：
+拥有 `user.read` 的管理员可在主工作台打开用户管理（`TabKey = admin`）：
 
 - 按用户名或昵称查询。
 - 按状态、角色筛选。
@@ -191,9 +191,11 @@ interface Page<T> {
 
 ## 5. 管理页面
 
-- 路径：`/admin/users`、`/admin/users/:userId`。
+- 用户管理是主工作台模块：`TabKey = admin`，与场景看板等共用 `MainLayout`。
+- 仅 `user.read` 可见侧栏入口；无权限直接访问旧路径时显示 `/403`。
+- 旧路径 `/admin/users` 仅作兼容跳转，不再渲染独立管理壳。Phase 1 不单独实现 `/admin/users/:userId` 详情页。
 - 包含加载、空、错误、无权限和分页状态。
-- 筛选条件同步到 URL Query。
+- 筛选条件保留在页面状态，不写入根路由 Query。
 - 禁用用户必须填写原因并二次确认。
 - 角色和状态冲突时提示刷新，不静默覆盖。
 - 成功后使用服务端返回结果更新页面。

@@ -44,6 +44,7 @@ def _space_http_error(exc: GraphSpaceError) -> HTTPException:
         "SPACE_NOT_FOUND": 404,
         "SPACE_FORBIDDEN": 403,
         "SPACE_NOT_READY": 409,
+        "CATALOG_UNAVAILABLE": 502,
     }.get(exc.code, 400)
     return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
 
@@ -52,12 +53,16 @@ def _space_http_error(exc: GraphSpaceError) -> HTTPException:
 @router.get("/health")
 async def health() -> dict[str, str | int]:
     client = get_client()
-    response = client.execute("SHOW TAGS;")
+    response = client.list_graphs()
+    try:
+        catalog_size = len(list_graph_spaces())
+    except GraphSpaceError:
+        catalog_size = 0
     return {
         "status": "ok" if response.error_code == 0 else "degraded",
         "database": "connected" if response.error_code == 0 else "unavailable",
         "space": getattr(client, "space", "anti_fraud_kg"),
-        "catalogSize": len(list_graph_spaces()),
+        "catalogSize": catalog_size,
     }
 
 #特征工厂的api
@@ -138,7 +143,10 @@ async def compile_feature_definition(definition: FeatureDefinition) -> FeatureCo
     dependencies=[Depends(require_permission("graph.read"))],
 )
 async def graph_spaces() -> list[GraphSpaceSummary]:
-    return list_graph_spaces()
+    try:
+        return list_graph_spaces()
+    except GraphSpaceError as exc:
+        raise _space_http_error(exc) from exc
 
 
 @router.get(

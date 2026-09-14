@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
-  ArrowLeft,
   ChevronLeft,
   ChevronRight,
   KeyRound,
@@ -8,12 +7,10 @@ import {
   Plus,
   RefreshCw,
   Search,
-  ShieldCheck,
   UserCog,
   Users,
-  Waypoints,
 } from 'lucide-react';
-import { Link, Navigate, useSearchParams } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -74,8 +71,8 @@ function passwordLevel(password: string): { score: number; label: string; classN
 
 export default function AdminUsers() {
   const { user, hasPermission } = useAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [queryInput, setQueryInput] = useState(searchParams.get('q') ?? '');
+  const [queryInput, setQueryInput] = useState('');
+  const [filters, setFilters] = useState({ q: '', status: '', role: '', page: 1 });
   const [data, setData] = useState<UserPage | null>(null);
   const [roles, setRoles] = useState<AdminRole[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,17 +82,6 @@ export default function AdminUsers() {
   const [roleUser, setRoleUser] = useState<AdminUser | null>(null);
   const [passwordUser, setPasswordUser] = useState<AdminUser | null>(null);
   const [statusUser, setStatusUser] = useState<AdminUser | null>(null);
-
-  const filterQuery = searchParams.get('q') ?? '';
-  const filterStatus = searchParams.get('status') ?? '';
-  const filterRole = searchParams.get('role') ?? '';
-  const filterPage = Math.max(1, Number(searchParams.get('page') ?? 1) || 1);
-  const filters = useMemo(() => ({
-    q: filterQuery,
-    status: filterStatus,
-    role: filterRole,
-    page: filterPage,
-  }), [filterQuery, filterStatus, filterRole, filterPage]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,12 +106,12 @@ export default function AdminUsers() {
 
   if (!hasPermission('user.read')) return <Navigate to="/403" replace />;
 
-  const setFilter = (key: string, value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    if (key !== 'page') next.set('page', '1');
-    setSearchParams(next);
+  const setFilter = (key: 'q' | 'status' | 'role' | 'page', value: string) => {
+    setFilters((prev) => ({
+      ...prev,
+      [key]: key === 'page' ? Math.max(1, Number(value) || 1) : value,
+      ...(key === 'page' ? {} : { page: 1 }),
+    }));
   };
 
   const handleSearch = (event: FormEvent) => {
@@ -134,34 +120,12 @@ export default function AdminUsers() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-40 h-12 border-b bg-white px-6">
-        <div className="flex h-full items-center gap-3">
-          <Link to="/" className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
-              <Waypoints className="h-4 w-4 text-white" />
-            </span>
-            <span className="text-sm font-semibold">图谱应用平台</span>
-          </Link>
-          <span className="h-5 w-px bg-border" />
-          <span className="text-sm font-medium text-foreground">用户管理</span>
-          <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-            <ShieldCheck className="h-4 w-4 text-primary" />
-            <span>{user?.displayName}</span>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-[1440px] p-6">
+    <div className="h-full overflow-auto bg-background">
+      <div className="mx-auto max-w-[1440px] p-6">
         <div className="mb-5 flex items-start justify-between">
           <div>
-            <div className="flex items-center gap-2">
-              <Button asChild variant="ghost" size="icon" className="-ml-2 h-8 w-8">
-                <Link to="/" aria-label="返回平台"><ArrowLeft className="h-4 w-4" /></Link>
-              </Button>
-              <h1 className="text-xl font-semibold">用户管理</h1>
-            </div>
-            <p className="ml-8 mt-1 text-sm text-muted-foreground">查询平台用户，维护账号状态和角色权限。</p>
+            <h1 className="text-xl font-semibold">用户管理</h1>
+            <p className="mt-1 text-sm text-muted-foreground">查询平台用户，维护账号状态和角色权限。</p>
           </div>
           {hasPermission('user.create') && (
             <Button onClick={() => setCreateOpen(true)}>
@@ -327,7 +291,7 @@ export default function AdminUsers() {
             </div>
           )}
         </section>
-      </main>
+      </div>
 
       <CreateUserDialog
         open={createOpen}

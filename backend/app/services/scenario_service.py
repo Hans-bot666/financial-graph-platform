@@ -72,33 +72,36 @@ def _execute_graph(title: str, space: str, query: str, summary: list[SummaryItem
 
 def execute_loan_reflux(space: str, company_name: str) -> GraphResult:
     safe_name = _escape_literal(company_name)
+    hops = "{1,5}"
     query = f"""
     MATCH p=(c:company)-[:holds_account]->(a:account)
-           -[:transfer*1..5]->(p2:person)-[:controls]->(c)
-    WHERE c.company.name == '{safe_name}'
-    RETURN p LIMIT 50;
+           -[:transfer]-{hops}(p2:person)-[:controls]->(c)
+    WHERE c.name = '{safe_name}'
+    RETURN p LIMIT 50
     """.strip()
     return _execute_graph("贷款回流路径", space, query)
 
 
 def execute_guarantee_circle(space: str, company_name: str) -> GraphResult:
     safe_name = _escape_literal(company_name)
+    hops = "{2,6}"
     query = f"""
-    MATCH p=(c:company)-[:guarantees*2..6]->(c)
-    WHERE c.company.name == '{safe_name}'
-    RETURN p LIMIT 50;
+    MATCH p=(c:company)-[:guarantees]->{hops}(c)
+    WHERE c.name = '{safe_name}'
+    RETURN p LIMIT 50
     """.strip()
     return _execute_graph("担保圈识别", space, query)
 
 
 def execute_lost_customer(space: str, company_name: str, lost_days: int) -> GraphResult:
     safe_name = _escape_literal(company_name)
+    hops = "{1,2}"
     query = f"""
-    MATCH p=(contact)-[:controls|employs|related_to*1..2]-(c:company)
-    WHERE c.company.name == '{safe_name}'
-      AND c.company.is_lost == true
-      AND c.company.lost_days >= {lost_days}
-    RETURN p LIMIT 50;
+    MATCH p=(contact)-[:controls|employs|related_to]-{hops}(c:company)
+    WHERE c.name = '{safe_name}'
+      AND c.is_lost = true
+      AND c.lost_days >= {lost_days}
+    RETURN p LIMIT 50
     """.strip()
     return _execute_graph(
         "失联客户追踪",

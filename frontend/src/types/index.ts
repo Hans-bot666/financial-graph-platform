@@ -69,7 +69,7 @@ export interface GraphStats {
 }
 
 /** 顶部导航页签 */
-export type TabKey = 'home' | 'model' | 'data' | 'explore' | 'feature';
+export type TabKey = 'home' | 'model' | 'data' | 'explore' | 'feature' | 'admin';
 
 export interface TabItem {
   key: TabKey;

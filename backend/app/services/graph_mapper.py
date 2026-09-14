@@ -16,7 +16,7 @@ def map_paths(rows: list[list[Any]]) -> tuple[list[GraphNode], list[GraphEdge]]:
             return
         tags = raw_node.get("tags") or {}
         node_type = str(raw_node.get("type") or "unknown")
-        properties: dict[str, Any] = dict(raw_node)
+        properties: dict[str, Any] = dict(raw_node.get("properties") or raw_node)
         if tags:
             node_type, tag_properties = next(iter(tags.items()))
             properties = dict(tag_properties)
@@ -33,8 +33,20 @@ def map_paths(rows: list[list[Any]]) -> tuple[list[GraphNode], list[GraphEdge]]:
             add_node(raw_node)
 
         for raw_edge in path.get("edges", []):
-            source = str(raw_edge.get("source") or raw_edge.get("from") or raw_edge.get("src") or "")
-            target = str(raw_edge.get("target") or raw_edge.get("to") or raw_edge.get("dst") or "")
+            source = str(
+                raw_edge.get("source")
+                or raw_edge.get("from")
+                or raw_edge.get("src")
+                or raw_edge.get("src_id")
+                or ""
+            )
+            target = str(
+                raw_edge.get("target")
+                or raw_edge.get("to")
+                or raw_edge.get("dst")
+                or raw_edge.get("dst_id")
+                or ""
+            )
             if not source or not target:
                 continue
             edge_type = str(raw_edge.get("type") or "unknown")

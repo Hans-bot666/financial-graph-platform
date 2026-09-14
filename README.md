@@ -18,8 +18,8 @@
 | 层 | 技术 |
 | --- | --- |
 | 前端 | React 18、TypeScript、Vite、Tailwind CSS、AntV G6、Radix UI |
-| 后端 | Python 3.11、FastAPI、Pydantic、nebula3-python |
-| 图数据库 | NebulaGraph 3.x |
+| 后端 | Python 3.11、FastAPI、Pydantic、nebula5-python 5.3.0 |
+| 图数据库 | NebulaGraph 5.3.1 |
 | 部署 | Docker、Docker Compose、Nginx |
 
 ## 目录结构
@@ -47,7 +47,7 @@ financial-graph-platform/
 - Node.js 20+，推荐 22
 - pnpm 9+
 - Python 3.11+
-- NebulaGraph 3.x
+- NebulaGraph 5.3.1
 - 可选：Docker 24+ 与 Docker Compose v2
 - 初始化数据库时需要 `nebula-console` 或 NebulaGraph Studio
 
@@ -105,8 +105,8 @@ export NEBULA_PORT=9669
 export NEBULA_USER=root
 export NEBULA_PASSWORD=nebula
 export NEBULA_SPACE=anti_fraud_kg
-# 可选：额外可在探索分析中选择的图空间（逗号分隔）
-export NEBULA_EXTRA_SPACES=random_financial_graph_million
+# 可选：隐藏不希望出现在下拉中的 Graph（逗号分隔）
+# export NEBULA_HIDDEN_GRAPHS=scratch_graph
 
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
@@ -115,10 +115,10 @@ uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/health
-# 需登录后：GET /api/v1/graph/spaces 返回白名单图空间目录
+# 需登录后：GET /api/v1/graph/spaces 返回库中可见 Graph（黑名单除外）
 ```
 
-图空间选择说明见 `docs/spec/graph-space/` 与 `docs/guides/random-graph-10k.md`。
+图空间选择说明见 `docs/spec/graph-space/`。测试图生成与搜索用 ID/名称见 `docs/guides/generate-graph.md`。
 
 - OpenAPI：<http://127.0.0.1:8000/docs>
 - API 基址：<http://127.0.0.1:8000/api/v1>
@@ -153,7 +153,7 @@ NEBULA_PORT=9669
 NEBULA_USER=root
 NEBULA_PASSWORD=请修改
 NEBULA_SPACE=anti_fraud_kg
-NEBULA_EXTRA_SPACES=random_financial_graph_million
+# NEBULA_HIDDEN_GRAPHS=scratch_graph
 ```
 
 Linux 服务器上应将 `NEBULA_HOST` 改为 NebulaGraph 的内网地址或 Compose 服务名。

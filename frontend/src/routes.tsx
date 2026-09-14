@@ -1,10 +1,17 @@
+import { Navigate } from 'react-router-dom';
 import MainLayout from './components/layouts/MainLayout';
-import AdminUsers from './pages/AdminUsers';
 import Forbidden from './pages/Forbidden';
 import Login from './pages/Login';
 import NotFound from './pages/NotFound';
 import Register from './pages/Register';
+import { useAuth } from './contexts/AuthContext';
 import type { ReactNode } from 'react';
+
+function AdminUsersEntry() {
+  const { hasPermission } = useAuth();
+  if (!hasPermission('user.read')) return <Navigate to="/403" replace />;
+  return <Navigate to="/" replace state={{ tab: 'admin' }} />;
+}
 
 export interface RouteConfig {
   name: string;
@@ -24,7 +31,7 @@ export const routes: RouteConfig[] = [
   {
     name: '用户管理',
     path: '/admin/users',
-    element: <AdminUsers />,
+    element: <AdminUsersEntry />,
   },
   {
     name: '登录',

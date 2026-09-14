@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
+import { Pencil, Plus, X } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,6 +39,7 @@ const THEME_COLORS: Record<string, { dot: string; border: string; label: string;
 };
 
 interface HomePageProps {
+  focusBoardRequest?: { id: string; requestId: number } | null;
   onNavigateToExplore: (sceneBoardId: string, graphData?: import('@/types/index').GraphData) => void;
 }
 
@@ -47,12 +49,13 @@ interface SceneBoardFormValues {
   description: string;
 }
 
-const HomePage: React.FC<HomePageProps> = ({ onNavigateToExplore }) => {
+const HomePage: React.FC<HomePageProps> = ({ focusBoardRequest, onNavigateToExplore }) => {
   const [stats, setStats] = useState<GraphStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [sceneBoards, setSceneBoards] = useState<SceneBoard[]>([]);
   const [subGraphs, setSubGraphs] = useState<SubGraph[]>([]);
   const [boardsLoading, setBoardsLoading] = useState(true);
+  const [highlightedBoardId, setHighlightedBoardId] = useState<string | null>(null);
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -87,6 +90,16 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigateToExplore }) => {
     const interval = setInterval(loadStats, REFRESH_INTERVAL);
     return () => clearInterval(interval);
   }, [loadStats, loadSceneBoards]);
+
+  useEffect(() => {
+    if (!focusBoardRequest || boardsLoading) return;
+    const element = document.getElementById(`scene-board-${focusBoardRequest.id}`);
+    if (!element) return;
+    element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    setHighlightedBoardId(focusBoardRequest.id);
+    const timer = window.setTimeout(() => setHighlightedBoardId(null), 2200);
+    return () => window.clearTimeout(timer);
+  }, [boardsLoading, focusBoardRequest]);
 
   const handleCreateBoard = async (values: SceneBoardFormValues) => {
     createBoard({
@@ -136,158 +149,125 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigateToExplore }) => {
   const getBoardSubGraphs = (boardId: string) =>
     subGraphs.filter((s) => s.scene_board_id === boardId);
 
+  const openCreate = () => {
+    createForm.reset();
+    setCreateDialogOpen(true);
+  };
+
   return (
-    <div className="flex h-[calc(100vh-48px)] overflow-hidden bg-background">
-      {/* 左侧：统计面板 */}
-      <div className="w-64 shrink-0 flex flex-col gap-3 p-4 border-r border-border bg-white overflow-y-auto">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">已保存分析统计</span>
-        </div>
-
-        {/* 实体统计 */}
-        <div className="rounded-lg border border-border bg-white p-4 card-hover cursor-default">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-muted-foreground">保存的节点</span>
-            <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <circle cx="7" cy="7" r="4" stroke="hsl(220 85% 55%)" strokeWidth="1.5" fill="none" />
-                <circle cx="7" cy="7" r="1.5" fill="hsl(220 85% 55%)" />
-              </svg>
+    <div className="flex h-[calc(100vh-48px)] flex-col overflow-hidden bg-[#f5f7fb]">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[1400px] px-6 py-5 pb-28">
+          {/* 页头 */}
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h1 className="text-xl font-semibold tracking-tight text-foreground">场景看板</h1>
+                <Badge className="border-0 bg-primary/10 px-2 py-0.5 text-xs font-normal text-primary">
+                  {sceneBoards.length} 个场景
+                </Badge>
+              </div>
+              <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
+                管理分析场景与已保存子图，从看板快速进入探索视图继续研判。
+              </p>
             </div>
+            <Button size="sm" onClick={openCreate} className="h-9 shrink-0 px-4 text-sm font-medium shadow-sm">
+              <Plus className="mr-1 h-4 w-4" />
+              新建场景
+            </Button>
           </div>
-          {statsLoading ? (
-            <Skeleton className="h-8 w-20 bg-muted" />
-          ) : (
-            <div className="text-2xl font-bold text-foreground">
-              {stats?.vertex_count?.toLocaleString() ?? '0'}
-            </div>
-          )}
-          <div className="text-xs text-muted-foreground mt-1">看板子图去重前合计</div>
-        </div>
 
-        {/* 关系统计 */}
-        <div className="rounded-lg border border-border bg-white p-4 card-hover cursor-default">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-muted-foreground">保存的边</span>
-            <div className="w-7 h-7 rounded-md bg-cyan-50 flex items-center justify-center">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M2 7 L12 7" stroke="#0891B2" strokeWidth="1.5" strokeLinecap="round" />
-                <path d="M9 4.5 L12 7 L9 9.5" stroke="#0891B2" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+          {/* 统计横幅 */}
+          <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border border-primary/10 bg-gradient-to-r from-primary/[0.07] to-sky-50/80 px-5 py-3.5">
+            <div className="flex items-center gap-2 text-sm text-foreground/80">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/80 text-primary shadow-sm">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+                  <circle cx="4" cy="4" r="2" fill="currentColor" opacity="0.9" />
+                  <circle cx="12" cy="4" r="2" fill="currentColor" opacity="0.9" />
+                  <circle cx="8" cy="12" r="2" fill="currentColor" opacity="0.9" />
+                  <path d="M4 4 L12 4 M4 4 L8 12 M12 4 L8 12" stroke="currentColor" strokeWidth="1" opacity="0.45" />
+                </svg>
+              </span>
+              <span>关系网络正在变得复杂</span>
             </div>
-          </div>
-          {statsLoading ? (
-            <Skeleton className="h-8 w-20 bg-muted" />
-          ) : (
-            <div className="text-2xl font-bold text-foreground">
-              {stats?.edge_count?.toLocaleString() ?? '0'}
-            </div>
-          )}
-          <div className="text-xs text-muted-foreground mt-1">看板子图去重前合计</div>
-        </div>
-
-        {/* 比值信息 */}
-        {stats && (
-          <div className="rounded-lg border border-border bg-secondary/50 p-3">
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">平均出度</span>
-                <span className="font-medium text-foreground">
-                  {stats.vertex_count > 0 ? (stats.edge_count / stats.vertex_count).toFixed(2) : '0.00'}
+            <div className="hidden h-5 w-px bg-primary/15 sm:block" />
+            {statsLoading ? (
+              <Skeleton className="h-5 w-48 bg-white/60" />
+            ) : (
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+                <span>
+                  <span className="font-semibold text-foreground">
+                    {(stats?.vertex_count ?? 0).toLocaleString()}
+                  </span>
+                  <span className="ml-1 text-muted-foreground">已保存实体</span>
+                </span>
+                <span className="hidden text-border sm:inline">|</span>
+                <span>
+                  <span className="font-semibold text-foreground">
+                    {(stats?.edge_count ?? 0).toLocaleString()}
+                  </span>
+                  <span className="ml-1 text-muted-foreground">条关系</span>
                 </span>
               </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">分析空间</span>
-                <span className="font-medium text-primary">{stats.space_name}</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">刷新时间</span>
-                <span className="text-muted-foreground">
-                  {new Date(stats.refreshed_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
+            )}
+            <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 pulse-dot" />
+              图谱持续更新中
             </div>
           </div>
-        )}
 
-        <div className="text-[11px] text-muted-foreground/60 mt-auto flex items-center gap-1">
-          <div className="w-1.5 h-1.5 rounded-full bg-green-400 pulse-dot" />
-          本浏览器保存结果，每30秒刷新
-        </div>
-      </div>
-
-      {/* 右侧：场景看板纵向列表 */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* 顶部操作栏 */}
-        <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-white shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="text-base font-semibold text-foreground">场景看板</span>
-            <Badge className="bg-primary/10 text-primary border-0 text-xs font-normal">
-              {sceneBoards.length} 个
-            </Badge>
+          {/* 我的分析场景 */}
+          <div className="mb-3">
+            <h2 className="text-base font-semibold text-foreground">我的分析场景</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">选择场景，快速进入已保存的分析视图</p>
           </div>
-          <Button
-            size="sm"
-            onClick={() => { createForm.reset(); setCreateDialogOpen(true); }}
-            className="h-8 px-4 text-xs font-medium"
-          >
-            + 新建场景
-          </Button>
-        </div>
 
-        {/* 场景看板横向列表（可左右滑动） */}
-        <div className="flex-1 overflow-hidden bg-background">
-          <div className="h-full overflow-x-auto overflow-y-hidden">
-            <div className="flex flex-row gap-4 p-5 h-full min-w-max items-start">
-              {boardsLoading ? (
-                <>
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="w-72 h-96 bg-muted rounded-xl shrink-0" />
-                  ))}
-                </>
-              ) : sceneBoards.length === 0 ? (
-                <div className="flex flex-col items-center justify-center w-72 h-64 border-2 border-dashed border-border rounded-xl bg-white shrink-0">
-                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-3">
-                    <span className="text-primary text-xl font-light">+</span>
-                  </div>
-                  <p className="text-sm font-medium text-foreground">暂无场景看板</p>
-                  <p className="text-xs text-muted-foreground mt-1">点击「新建场景」开始创建</p>
-                </div>
-              ) : (
-                <>
-                  {sceneBoards.map((board) => (
-                    <SceneBoardSection
-                      key={board.id}
-                      board={board}
-                      subGraphs={getBoardSubGraphs(board.id)}
-                      onEdit={() => openEditDialog(board)}
-                      onDelete={() => { setDeletingBoardId(board.id); setDeleteDialogOpen(true); }}
-                      onAddSubGraph={() => onNavigateToExplore(board.id)}
-                      onOpenSubGraph={(graphData) => onNavigateToExplore(board.id, graphData)}
-                      onDeleteSubGraph={(id) => { setDeleteSubGraphId(id); setDeleteSubGraphDialogOpen(true); }}
-                    />
-                  ))}
-                </>
-              )}
-              {/* 新增列按钮 */}
-              {!boardsLoading && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {boardsLoading ? (
+              [1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-[26rem] w-full rounded-2xl bg-muted" />
+              ))
+            ) : (
+              <>
+                {sceneBoards.map((board) => (
+                  <SceneBoardSection
+                    key={board.id}
+                    board={board}
+                      highlighted={highlightedBoardId === board.id}
+                    subGraphs={getBoardSubGraphs(board.id)}
+                    onEdit={() => openEditDialog(board)}
+                    onDelete={() => {
+                      setDeletingBoardId(board.id);
+                      setDeleteDialogOpen(true);
+                    }}
+                    onAddSubGraph={() => onNavigateToExplore(board.id)}
+                    onOpenSubGraph={(graphData) => onNavigateToExplore(board.id, graphData)}
+                    onDeleteSubGraph={(id) => {
+                      setDeleteSubGraphId(id);
+                      setDeleteSubGraphDialogOpen(true);
+                    }}
+                  />
+                ))}
                 <button
                   type="button"
-                  onClick={() => { createForm.reset(); setCreateDialogOpen(true); }}
-                  className="flex flex-col items-center justify-center w-16 self-stretch min-h-32 border-2 border-dashed border-border hover:border-primary/50 hover:bg-primary/5 rounded-xl transition-all group shrink-0"
+                  onClick={openCreate}
+                  className="flex min-h-[16rem] w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-border/80 bg-white/60 px-4 py-10 text-muted-foreground transition-all hover:border-primary/40 hover:bg-primary/[0.03] hover:text-primary"
                 >
-                  <span className="text-2xl text-muted-foreground/40 group-hover:text-primary transition-colors font-light">+</span>
-                  <span className="text-[10px] text-muted-foreground/40 group-hover:text-muted-foreground mt-1 transition-colors [writing-mode:vertical-lr] tracking-wider">新建场景</span>
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-2xl font-light text-muted-foreground/70">
+                    +
+                  </span>
+                  <span className="text-sm font-medium">添加场景看板</span>
+                  <span className="text-center text-xs text-muted-foreground/70">新建场景后可在其中保存探索结果</span>
                 </button>
-              )}
-            </div>
+              </>
+            )}
           </div>
         </div>
       </div>
 
       {/* 创建看板弹窗 */}
       <Dialog open={createDialogOpen} onOpenChange={(open) => { setCreateDialogOpen(open); if (!open) createForm.reset(); }}>
-        <DialogContent className="bg-white max-w-sm">
+        <DialogContent className="max-w-sm bg-white">
           <DialogHeader>
             <DialogTitle>新建场景看板</DialogTitle>
           </DialogHeader>
@@ -307,11 +287,11 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigateToExplore }) => {
                   <FormItem>
                     <FormLabel>主题色</FormLabel>
                     <FormControl>
-                      <div className="flex gap-2 flex-wrap">
+                      <div className="flex flex-wrap gap-2">
                         {Object.entries(THEME_COLORS).map(([key, t]) => (
                           <button key={key} type="button" onClick={() => field.onChange(key)}
-                            className={cn('px-3 py-1 rounded-md text-xs border transition-all', field.value === key ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40')}>
-                            <span className={cn('inline-block w-2 h-2 rounded-full mr-1.5', t.dot)} />
+                            className={cn('rounded-md border px-3 py-1 text-xs transition-all', field.value === key ? 'border-primary bg-primary/10 font-medium text-primary' : 'border-border text-muted-foreground hover:border-primary/40')}>
+                            <span className={cn('mr-1.5 inline-block h-2 w-2 rounded-full', t.dot)} />
                             {t.label}
                           </button>
                         ))}
@@ -337,9 +317,8 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigateToExplore }) => {
         </DialogContent>
       </Dialog>
 
-      {/* 编辑看板弹窗 */}
       <Dialog open={editDialogOpen} onOpenChange={(open) => { setEditDialogOpen(open); if (!open) setEditingBoard(null); }}>
-        <DialogContent className="bg-white max-w-sm">
+        <DialogContent className="max-w-sm bg-white">
           <DialogHeader>
             <DialogTitle>编辑场景看板</DialogTitle>
           </DialogHeader>
@@ -359,11 +338,11 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigateToExplore }) => {
                   <FormItem>
                     <FormLabel>主题色</FormLabel>
                     <FormControl>
-                      <div className="flex gap-2 flex-wrap">
+                      <div className="flex flex-wrap gap-2">
                         {Object.entries(THEME_COLORS).map(([key, t]) => (
                           <button key={key} type="button" onClick={() => field.onChange(key)}
-                            className={cn('px-3 py-1 rounded-md text-xs border transition-all', field.value === key ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40')}>
-                            <span className={cn('inline-block w-2 h-2 rounded-full mr-1.5', t.dot)} />
+                            className={cn('rounded-md border px-3 py-1 text-xs transition-all', field.value === key ? 'border-primary bg-primary/10 font-medium text-primary' : 'border-border text-muted-foreground hover:border-primary/40')}>
+                            <span className={cn('mr-1.5 inline-block h-2 w-2 rounded-full', t.dot)} />
                             {t.label}
                           </button>
                         ))}
@@ -389,7 +368,6 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigateToExplore }) => {
         </DialogContent>
       </Dialog>
 
-      {/* 删除场景看板 */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="bg-white">
           <AlertDialogHeader>
@@ -403,7 +381,6 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigateToExplore }) => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 删除子图 */}
       <AlertDialog open={deleteSubGraphDialogOpen} onOpenChange={setDeleteSubGraphDialogOpen}>
         <AlertDialogContent className="bg-white">
           <AlertDialogHeader>
@@ -420,9 +397,9 @@ const HomePage: React.FC<HomePageProps> = ({ onNavigateToExplore }) => {
   );
 };
 
-// ── 单个场景看板列（横向排布，内部子图纵向堆叠）
 interface SceneBoardSectionProps {
   board: SceneBoard;
+  highlighted: boolean;
   subGraphs: SubGraph[];
   onEdit: () => void;
   onDelete: () => void;
@@ -433,6 +410,7 @@ interface SceneBoardSectionProps {
 
 const SceneBoardSection: React.FC<SceneBoardSectionProps> = ({
   board,
+  highlighted,
   subGraphs,
   onEdit,
   onDelete,
@@ -443,72 +421,64 @@ const SceneBoardSection: React.FC<SceneBoardSectionProps> = ({
   const theme = THEME_COLORS[board.theme] ?? THEME_COLORS.default;
 
   return (
-    <div className="w-72 shrink-0 flex flex-col bg-secondary/50 border border-border rounded-xl overflow-hidden self-start">
-      {/* 列标题栏 */}
-      <div className={cn('flex items-center justify-between px-4 py-3 border-b border-border', theme.bg)}>
-        <div className="flex items-center gap-2 min-w-0">
-          <span className={cn('w-2.5 h-2.5 rounded-full shrink-0', theme.dot)} />
-          <span className="font-semibold text-foreground text-sm truncate">{board.name}</span>
-          <Badge variant="outline" className="text-[11px] border-border/60 text-muted-foreground font-normal shrink-0">
+    <div
+      id={`scene-board-${board.id}`}
+      className={cn(
+        'flex min-w-0 w-full flex-col overflow-hidden rounded-2xl border border-border/80 bg-white shadow-sm',
+        'transition-[box-shadow,border-color] duration-300',
+        highlighted && 'border-primary/60 shadow-[0_0_0_4px_rgba(59,113,232,0.14)]',
+      )}
+    >
+      <div className={cn('flex items-center justify-between border-b border-border/60 px-4 py-3', theme.bg)}>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={cn('h-2.5 w-2.5 shrink-0 rounded-full', theme.dot)} />
+          <span className="truncate text-sm font-semibold text-foreground">{board.name}</span>
+          <Badge variant="outline" className="shrink-0 border-border/60 text-[11px] font-normal text-muted-foreground">
             {subGraphs.length}
           </Badge>
         </div>
-        <div className="flex items-center gap-0.5 shrink-0">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onAddSubGraph}
-            className="h-6 w-6 p-0 text-primary hover:bg-primary/10 rounded"
-            title="添加子图"
-          >
-            +
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button size="sm" variant="ghost" onClick={onAddSubGraph} className="h-7 w-7 p-0 text-primary hover:bg-primary/10" title="添加子图">
+            <Plus className="h-3.5 w-3.5" />
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onEdit}
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground rounded text-xs"
-            title="编辑"
-          >
-            ✎
+          <Button size="sm" variant="ghost" onClick={onEdit} className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground" title="编辑">
+            <Pencil className="h-3.5 w-3.5" />
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onDelete}
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive rounded text-xs"
-            title="删除"
-          >
-            ⋯
+          <Button size="sm" variant="ghost" onClick={onDelete} className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" title="删除">
+            <X className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
 
-      {/* 子图纵向列表 */}
-      <div className="flex flex-col gap-2.5 p-3 overflow-y-auto max-h-[calc(100vh-160px)]">
+      <div className="flex max-h-[22rem] min-h-[14rem] flex-col gap-2.5 overflow-y-auto bg-[#f8fafc]/60 p-3">
         {subGraphs.length === 0 ? (
           <button
             type="button"
             onClick={onAddSubGraph}
-            className="flex flex-col items-center justify-center h-24 border-2 border-dashed border-border hover:border-primary/40 hover:bg-white rounded-lg transition-all group"
+            className="flex h-28 flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-white transition-all hover:border-primary/40 hover:bg-primary/[0.02] group"
           >
-            <div className="w-7 h-7 rounded-full bg-secondary group-hover:bg-primary/10 flex items-center justify-center mb-1.5 transition-colors">
-              <span className="text-muted-foreground group-hover:text-primary text-lg leading-none font-light transition-colors">+</span>
-            </div>
-            <span className="text-xs text-muted-foreground/70 group-hover:text-muted-foreground transition-colors">添加子图看板</span>
+            <span className="mb-1.5 flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-lg font-light text-muted-foreground transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+              +
+            </span>
+            <span className="text-xs text-muted-foreground">添加子图看板</span>
           </button>
         ) : (
           <>
             {subGraphs.map((sg) => (
-              <SubGraphCard key={sg.id} subGraph={sg} onOpen={() => onOpenSubGraph(sg.graph_data)} onDelete={() => onDeleteSubGraph(sg.id)} />
+              <SubGraphCard
+                key={sg.id}
+                subGraph={sg}
+                onOpen={() => onOpenSubGraph(sg.graph_data)}
+                onDelete={() => onDeleteSubGraph(sg.id)}
+              />
             ))}
             <button
               type="button"
               onClick={onAddSubGraph}
-              className="flex items-center justify-center gap-1.5 h-9 border border-dashed border-border hover:border-primary/40 hover:bg-white rounded-lg transition-all group"
+              className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-dashed border-border bg-white/80 transition-all hover:border-primary/40 hover:bg-white group"
             >
-              <span className="text-muted-foreground/50 group-hover:text-primary text-sm font-light transition-colors">+</span>
-              <span className="text-xs text-muted-foreground/50 group-hover:text-muted-foreground transition-colors">添加子图</span>
+              <Plus className="h-3.5 w-3.5 text-muted-foreground/50 transition-colors group-hover:text-primary" />
+              <span className="text-xs text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">添加子图</span>
             </button>
           </>
         )}
@@ -517,7 +487,6 @@ const SceneBoardSection: React.FC<SceneBoardSectionProps> = ({
   );
 };
 
-// ── 子图卡片
 interface SubGraphCardProps {
   subGraph: SubGraph;
   onDelete: () => void;
@@ -527,32 +496,41 @@ interface SubGraphCardProps {
 const SubGraphCard: React.FC<SubGraphCardProps> = ({ subGraph, onDelete, onOpen }) => {
   const nodeCount = subGraph.graph_data?.nodes?.length ?? 0;
   const edgeCount = subGraph.graph_data?.edges?.length ?? 0;
+  const subtitle = subGraph.query_text?.trim() || `${nodeCount} 节点 · ${edgeCount} 边`;
 
   return (
-    <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(event) => { if (event.key === 'Enter') onOpen(); }} className="relative flex cursor-pointer items-center gap-3 overflow-hidden rounded-lg border border-border bg-white px-3 py-2.5 group card-hover">
-      {/* 左侧蓝条 */}
-      <div className="absolute left-0 top-2 bottom-2 w-0.5 bg-primary rounded-r" />
-
-      {/* 迷你图预览 */}
-      <div className="w-12 h-10 flex items-center justify-center bg-secondary/50 rounded-md shrink-0">
-        {subGraph.thumbnail ? <img src={subGraph.thumbnail} alt={`${subGraph.name} 缩略图`} className="h-full w-full object-contain" /> : <MiniGraphPreview nodes={nodeCount} edges={edgeCount} />}
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') onOpen();
+      }}
+      className="group relative flex cursor-pointer items-center gap-3 overflow-hidden rounded-xl border border-border/80 bg-white px-3 py-2.5 shadow-sm transition-all hover:border-primary/25 hover:shadow-md"
+    >
+      <div className="flex h-12 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-secondary/60">
+        {subGraph.thumbnail ? (
+          <img src={subGraph.thumbnail} alt={`${subGraph.name} 缩略图`} className="h-full w-full object-contain" />
+        ) : (
+          <MiniGraphPreview nodes={nodeCount} edges={edgeCount} />
+        )}
       </div>
 
-      {/* 文字信息 */}
-      <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium text-foreground truncate leading-snug">{subGraph.name}</div>
-        <div className="text-[11px] text-muted-foreground flex gap-1.5 mt-0.5">
-          <span>{nodeCount} 节点</span>
-          <span>·</span>
-          <span>{edgeCount} 边</span>
-        </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-xs font-medium leading-snug text-foreground">{subGraph.name}</div>
+        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{subtitle}</div>
       </div>
 
-      {/* 删除按钮 */}
+      <span className="text-muted-foreground/40 transition-colors group-hover:text-primary">›</span>
+
       <button
         type="button"
-        onClick={(event) => { event.stopPropagation(); onDelete(); }}
-        className="w-5 h-5 rounded flex items-center justify-center text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 transition-all opacity-0 group-hover:opacity-100 shrink-0 text-xs"
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+        className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-xs text-muted-foreground/0 transition-all group-hover:bg-destructive/10 group-hover:text-destructive"
+        aria-label="删除子图"
       >
         ✕
       </button>
@@ -560,7 +538,6 @@ const SubGraphCard: React.FC<SubGraphCardProps> = ({ subGraph, onDelete, onOpen 
   );
 };
 
-// ── 迷你图预览
 const MiniGraphPreview: React.FC<{ nodes: number; edges: number }> = ({ nodes, edges }) => {
   const displayNodes = Math.min(nodes, 5);
   const positions = [

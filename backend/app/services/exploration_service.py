@@ -1,4 +1,4 @@
-"""探索分析的受控 nGQL 构造与执行。"""
+"""探索分析的受控 GQL 构造与执行。"""
 from __future__ import annotations
 
 from time import perf_counter
@@ -31,6 +31,16 @@ def _edge_expression(edge_types: list[str]) -> str:
     return "|".join(selected)
 
 
+def _quantified_path(edge_expr: str, min_hops: int, max_hops: int, direction: str) -> str:
+    """NebulaGraph 5.x GQL 变长路径是 (a)-[:e]-{m,n}(b)，不是 nGQL 的 *m..n。"""
+    hops = f"{{{min_hops},{max_hops}}}"
+    if direction == "out":
+        return f"(s)-[:{edge_expr}]->{hops}(t)"
+    if direction == "in":
+        return f"(s)<-[:{edge_expr}]-{hops}(t)"
+    return f"(s)-[:{edge_expr}]-{hops}(t)"
+
+
 def _execute(title: str, space: str, query: str) -> GraphResult:
     trace_id = uuid4().hex
     started = perf_counter()
@@ -50,11 +60,11 @@ def lookup_vertex(space: str, value: str, field: str, entity_type: str | None) -
     if entity_type and entity_type not in ENTITY_TYPES:
         raise ExplorationQueryError(f"不支持的实体类型：{entity_type}")
     if field == "id":
-        query = f"MATCH (v) WHERE id(v) == {_literal(value)} RETURN v LIMIT 20;"
+        query = f"MATCH (v) WHERE v.id = {_literal(value)} RETURN v LIMIT 20"
     else:
         if not entity_type:
             raise ExplorationQueryError("按名称查询时必须选择实体类型")
-        query = f"MATCH (v:{entity_type}) WHERE v.{entity_type}.name == {_literal(value)} RETURN v LIMIT 20;"
+        query = f"MATCH (v:{entity_type}) WHERE v.name = {_literal(value)} RETURN v LIMIT 20"
     return _execute("实体查询", space, query)
 
 
@@ -64,24 +74,26 @@ def expand_vertex(
     if min_hops > max_hops:
         raise ExplorationQueryError("最小跳数不能大于最大跳数")
     edge_expr = _edge_expression(edge_types)
-    pattern = {
-        "out": f"(s)-[:{edge_expr}*{min_hops}..{max_hops}]->(t)",
-        "in": f"(s)<-[:{edge_expr}*{min_hops}..{max_hops}]-(t)",
-        "both": f"(s)-[:{edge_expr}*{min_hops}..{max_hops}]-(t)",
-    }[direction]
-    query = f"MATCH p={pattern} WHERE id(s) == {_literal(vertex_id)} RETURN p LIMIT 200;"
+    pattern = _quantified_path(edge_expr, min_hops, max_hops, direction)
+    query = f"MATCH p={pattern} WHERE s.id = {_literal(vertex_id)} RETURN p LIMIT 200"
     return _execute(f"{min_hops}-{max_hops} 跳关系展开", space, query)
 
 
 def find_paths(
     space: str, start_id: str, end_id: str, mode: str, max_hops: int, edge_types: list[str],
 ) -> GraphResult:
-    # FIND PATH 的 OVER 类型列表使用逗号；MATCH 边标签表达式使用竖线。
-    edge_expr = _edge_expression(edge_types).replace("|", ",")
-    keyword = "ALL PATH" if mode == "all" else "SHORTEST PATH"
-    suffix = " | LIMIT 1" if mode == "any-shortest" else (" | LIMIT 100" if mode == "all" else "")
-    query = (
-        f"FIND {keyword} WITH PROP FROM {_literal(start_id)} TO {_literal(end_id)} "
-        f"OVER {edge_expr} UPTO {max_hops} STEPS YIELD path AS p{suffix};"
-    )
+    edge_expr = _edge_expression(edge_types)
+    pattern = f"(s)-[:{edge_expr}]-{{1,{max_hops}}}(t)"
+    if mode == "all":
+        query = (
+            f"MATCH p={pattern} WHERE s.id = {_literal(start_id)} AND t.id = {_literal(end_id)} "
+            "RETURN p LIMIT 100"
+        )
+    else:
+        limit = " LIMIT 1" if mode == "any-shortest" else " LIMIT 20"
+        query = (
+            f"MATCH p = ANY SHORTEST PATH {pattern} "
+            f"WHERE s.id = {_literal(start_id)} AND t.id = {_literal(end_id)} "
+            f"RETURN p{limit}"
+        )
     return _execute("路径分析", space, query)
